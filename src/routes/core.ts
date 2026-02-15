@@ -119,6 +119,44 @@ router.post(
 	},
 );
 
+// Export cookies from a tab's browser context
+router.get(
+	'/tabs/:tabId/cookies',
+	async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown }>, res: Response) => {
+		try {
+			if (!CONFIG.apiKey) {
+				return res.status(403).json({
+					error: 'Cookie export is disabled. Set CAMOFOX_API_KEY to enable this endpoint.',
+				});
+			}
+
+			if (!isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+				return res.status(403).json({ error: 'Forbidden' });
+			}
+
+			const userId = req.query.userId;
+			const tabId = req.params.tabId;
+			const found = findTabById(tabId, userId);
+			if (!found) return res.status(404).json({ error: 'Tab not found' });
+
+			const { session } = found;
+			const cookies = await session.context.cookies();
+
+			log('info', 'cookies exported', {
+				reqId: req.reqId,
+				tabId,
+				userId: String(userId),
+				count: cookies.length,
+			});
+			return res.json(cookies);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'cookie export failed', { reqId: req.reqId, error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
+
 // Health check
 router.get('/health', async (_req: Request, res: Response) => {
 	try {
