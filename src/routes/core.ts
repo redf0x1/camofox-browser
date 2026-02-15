@@ -49,7 +49,7 @@ const router = Router();
 router.post(
 	'/sessions/:userId/cookies',
 	express.json({ limit: '512kb' }),
-	async (req: Request<{ userId: string }, unknown, { cookies?: unknown }>, res: Response) => {
+	async (req: Request<{ userId: string }, unknown, { cookies?: unknown; tabId?: unknown }>, res: Response) => {
 		try {
 			if (!CONFIG.apiKey) {
 				return res.status(403).json({
@@ -66,9 +66,12 @@ router.post(
 				return res.status(400).json({ error: 'Missing "cookies" field in request body' });
 			}
 
-			const cookiesUnknown = (req.body as { cookies?: unknown }).cookies;
+			const { cookies: cookiesUnknown, tabId: tabIdUnknown } = req.body as { cookies?: unknown; tabId?: unknown };
 			if (!Array.isArray(cookiesUnknown)) {
 				return res.status(400).json({ error: 'cookies must be an array' });
+			}
+			if (tabIdUnknown !== undefined && (typeof tabIdUnknown !== 'string' || !tabIdUnknown)) {
+				return res.status(400).json({ error: 'tabId must be a non-empty string' });
 			}
 			const cookies = cookiesUnknown as CookieInput[];
 
@@ -106,7 +109,14 @@ router.post(
 				return clean;
 			});
 
-			const session = await getSession(userId);
+			let session: Awaited<ReturnType<typeof getSession>>;
+			if (tabIdUnknown) {
+				const found = findTabById(tabIdUnknown, userId);
+				if (!found) return res.status(404).json({ error: 'Tab not found' });
+				session = found.session;
+			} else {
+				session = await getSession(userId);
+			}
 			await session.context.addCookies(sanitized as never);
 			const result = { ok: true, userId: String(userId), count: sanitized.length };
 			log('info', 'cookies imported', { reqId: req.reqId, userId: String(userId), count: sanitized.length });
