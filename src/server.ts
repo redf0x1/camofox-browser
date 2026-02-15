@@ -1,0 +1,84 @@
+import type { Server } from 'node:http';
+
+import express from 'express';
+
+import coreRoutes from './routes/core';
+import openclawRoutes from './routes/openclaw';
+import { installCrashHandlers, safeError } from './middleware/errors';
+import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
+import { loadConfig } from './utils/config';
+import { closeBrowser, ensureBrowser, getBrowser } from './services/browser';
+import { closeAllSessions, countTotalTabsForSessions, getAllSessions, startCleanupInterval } from './services/session';
+
+const CONFIG = loadConfig();
+
+const app = express();
+app.use(express.json({ limit: '100kb' }));
+app.use(loggingMiddleware);
+
+app.use(coreRoutes);
+app.use(openclawRoutes);
+
+// Fallback error middleware (routes largely handle their own errors to preserve legacy behavior)
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+	const anyErr = err as { status?: number; statusCode?: number };
+	const status = anyErr.statusCode || anyErr.status || 500;
+	res.status(status).json({ error: safeError(err) });
+});
+
+installCrashHandlers();
+
+startCleanupInterval();
+
+startStatsBeacon(() => {
+	const sessions = getAllSessions().size;
+	const tabs = countTotalTabsForSessions();
+	const browserConnected = getBrowser()?.isConnected() ?? false;
+	return { sessions, tabs, rssBytes: 0, heapUsedBytes: 0, uptimeSeconds: 0, browserConnected };
+});
+
+const PORT = CONFIG.port;
+let server: Server;
+
+let shuttingDown = false;
+async function gracefulShutdown(signal: string): Promise<void> {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	log('info', 'shutting down', { signal });
+
+	const forceTimeout = setTimeout(() => {
+		log('error', 'shutdown timed out, forcing exit');
+		process.exit(1);
+	}, 10000);
+	forceTimeout.unref();
+
+	try {
+		server.close();
+	} catch {
+		// ignore
+	}
+
+	await closeAllSessions().catch(() => {});
+	await closeBrowser().catch(() => {});
+	process.exit(0);
+}
+
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+
+server = app.listen(PORT, () => {
+	log('info', 'server started', { port: PORT, pid: process.pid, nodeVersion: process.version });
+	ensureBrowser().catch((err) => {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'browser pre-launch failed', { error: message });
+	});
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+	if (err.code === 'EADDRINUSE') {
+		log('error', 'port in use', { port: PORT });
+		process.exit(1);
+	}
+	log('error', 'server error', { error: err.message });
+	process.exit(1);
+});
