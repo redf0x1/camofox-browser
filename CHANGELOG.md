@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.1] - 2026-02-16
+
+### Fixed
+- Filling text into `contenteditable` elements now uses a keyboard-based replace to avoid doubled text in rich editors.
+
 ## [1.1.0] - 2026-02-16
 
 ### Added

@@ -19,7 +19,7 @@ import {
 	indexTab,
 	unindexTab,
 } from '../services/session';
-import { buildRefs, createTabState, getAriaSnapshot, annotateAriaYamlWithRefs, refToLocator, validateUrl, withTabLock } from '../services/tab';
+import { annotateAriaYamlWithRefs, buildRefs, createTabState, getAriaSnapshot, refToLocator, smartFill, validateUrl, withTabLock } from '../services/tab';
 
 const CONFIG = loadConfig();
 
@@ -309,10 +309,11 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					if (ref) {
 						const locator = refToLocator(tabState.page, ref, tabState.refs);
 						if (!locator) throw new Error(`Unknown ref: ${ref}`);
-						await locator.fill(text, { timeout: 10000 });
+						await smartFill(locator, tabState.page, text);
 						if (submit) await tabState.page.keyboard.press('Enter');
 					} else {
-						await tabState.page.fill(String(selector), text, { timeout: 10000 });
+						const locator = tabState.page.locator(String(selector));
+						await smartFill(locator, tabState.page, text);
 						if (submit) await tabState.page.keyboard.press('Enter');
 					}
 					return { ok: true, targetId };

@@ -408,6 +408,23 @@ export async function clickTab(tabId: string, tabState: TabState, params: { ref?
 	});
 }
 
+/**
+ * Smart fill that handles contenteditable elements differently from standard inputs.
+ * Prevents text doubling on rich-text editors (Lexical, ProseMirror, Slate, etc.)
+ */
+export async function smartFill(locator: Locator, page: Page, text: string): Promise<void> {
+	const isContentEditable = await locator.evaluate((el) => (el as any).isContentEditable).catch(() => false);
+
+	if (isContentEditable) {
+		await locator.focus();
+		await page.keyboard.press('ControlOrMeta+a');
+		await page.keyboard.press('Backspace');
+		await page.keyboard.insertText(text);
+	} else {
+		await locator.fill(text, { timeout: 10000 });
+	}
+}
+
 export async function typeTab(tabId: string, tabState: TabState, params: { ref?: string; selector?: string; text: string }): Promise<{ ok: true }>{
 	const { ref, selector, text } = params;
 	if (!ref && !selector) {
@@ -417,13 +434,16 @@ export async function typeTab(tabId: string, tabState: TabState, params: { ref?:
 	}
 
 	await withTabLock(tabId, async () => {
+		let locator: Locator;
 		if (ref) {
-			const locator = refToLocator(tabState.page, ref, tabState.refs);
-			if (!locator) throw new Error(`Unknown ref: ${ref}`);
-			await locator.fill(text, { timeout: 10000 });
+			const resolved = refToLocator(tabState.page, ref, tabState.refs);
+			if (!resolved) throw new Error(`Unknown ref: ${ref}`);
+			locator = resolved;
 		} else {
-			await tabState.page.fill(selector as string, text, { timeout: 10000 });
+			locator = tabState.page.locator(selector as string);
 		}
+
+		await smartFill(locator, tabState.page, text);
 	});
 
 	return { ok: true as const };
