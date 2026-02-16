@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.0] - 2026-02-16
+
+### Added
+- `POST /tabs/:tabId/scroll-element` — Scroll specific container elements (modals, sidebars, overflow divs) with `selector`/`ref`, `deltaY`/`deltaX`, or `scrollTo` positioning. Returns scroll position metadata.
+- `POST /tabs/:tabId/evaluate` — Execute JavaScript expressions in page context (isolated scope). API key required. Supports timeout configuration, max 64KB expression, 1MB result cap.
+
+### Notes
+- `evaluate` endpoint runs in isolated scope, invisible to page scripts — safe for anti-detection.
+- Element scrolling: use `selector: "html"` for page-level scrolling (not `"body"`).
+
 ## [1.0.1] - 2025-02-15
 
 ### Fixed

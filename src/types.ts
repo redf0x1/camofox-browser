@@ -69,6 +69,37 @@ export interface CookieInput {
   sameSite?: string;
 }
 
+export interface ScrollElementParams {
+  selector?: string;
+  ref?: string;
+  deltaX?: number;
+  deltaY?: number;
+  scrollTo?: { top?: number; left?: number };
+}
+
+export interface ScrollPosition {
+  scrollTop: number;
+  scrollLeft: number;
+  scrollHeight: number;
+  clientHeight: number;
+  scrollWidth: number;
+  clientWidth: number;
+}
+
+export interface EvaluateParams {
+  expression: string;
+  timeout?: number;
+}
+
+export interface EvaluateResult {
+  ok: boolean;
+  result?: unknown;
+  resultType?: string;
+  truncated?: boolean;
+  error?: string;
+  errorType?: 'js_error' | 'timeout' | 'validation';
+}
+
 declare global {
   namespace Express {
     // Attached by logging middleware for correlation + timing.

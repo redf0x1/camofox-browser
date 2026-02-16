@@ -1,7 +1,7 @@
 import type { Locator, Page } from 'playwright-core';
 
 import { expandMacro } from '../utils/macros';
-import type { RefInfo, TabState, WaitForPageReadyOptions } from '../types';
+import type { EvaluateResult, RefInfo, ScrollPosition, TabState, WaitForPageReadyOptions } from '../types';
 import { log } from '../middleware/logging';
 
 const ALLOWED_URL_SCHEMES: ReadonlyArray<'http:' | 'https:'> = ['http:', 'https:'];
@@ -27,6 +27,10 @@ const INTERACTIVE_ROLES: ReadonlyArray<string> = [
 const SKIP_PATTERNS: ReadonlyArray<RegExp> = [/date/i, /calendar/i, /picker/i, /datepicker/i];
 
 const MAX_SNAPSHOT_NODES = 500;
+
+const MAX_EVAL_TIMEOUT = 30000;
+const DEFAULT_EVAL_TIMEOUT = 5000;
+const MAX_RESULT_SIZE = 1048576; // 1MB
 
 // Per-tab locks to serialize operations on the same tab
 // tabId -> Promise (the currently executing operation)
@@ -438,6 +442,159 @@ export async function scrollTab(tabState: TabState, params: { direction?: 'up' |
 	await tabState.page.mouse.wheel(0, delta);
 	await tabState.page.waitForTimeout(300);
 	return { ok: true as const };
+}
+
+export async function scrollElementTab(
+	tabId: string,
+	tabState: TabState,
+	params: { selector?: string; ref?: string; deltaX?: number; deltaY?: number; scrollTo?: { top?: number; left?: number } },
+): Promise<{ ok: true; scrollPosition: ScrollPosition }>{
+	const { selector, ref, scrollTo } = params;
+	if (!ref && !selector) {
+		const err = new Error('ref or selector required');
+		(err as Error & { statusCode?: number }).statusCode = 400;
+		throw err;
+	}
+
+	return withTabLock(tabId, async () => {
+		const page = tabState.page;
+
+		let locator: Locator;
+		if (ref) {
+			const resolved = refToLocator(page, ref, tabState.refs);
+			if (!resolved) {
+				const maxRef = tabState.refs.size > 0 ? `e${tabState.refs.size}` : 'none';
+				const err = new Error(
+					`Unknown ref: ${ref} (valid refs: e1-${maxRef}, ${tabState.refs.size} total). Refs reset after navigation - call snapshot first.`,
+				);
+				(err as Error & { statusCode?: number }).statusCode = 400;
+				throw err;
+			}
+			locator = resolved;
+		} else {
+			locator = page.locator(selector as string);
+		}
+
+		const count = await locator.count();
+		if (count === 0) {
+			const err = new Error(`Element not found: ${ref || selector}`);
+			(err as Error & { statusCode?: number }).statusCode = 400;
+			throw err;
+		}
+
+		const element = locator.first();
+
+		if (scrollTo) {
+			await element.evaluate(
+				(el, pos) => {
+					const e = el as unknown as { scrollTop: number; scrollLeft: number };
+					const p = pos as { top?: number; left?: number };
+					if (p.top !== undefined) e.scrollTop = p.top;
+					if (p.left !== undefined) e.scrollLeft = p.left;
+				},
+				scrollTo,
+			);
+		} else {
+			const deltaX = params.deltaX ?? 0;
+			const deltaY = params.deltaY ?? 300;
+			await element.evaluate(
+				(el, delta) => {
+					(el as unknown as { scrollBy: (opts: { top: number; left: number; behavior: 'auto' }) => void }).scrollBy({
+						top: (delta as { y: number }).y,
+						left: (delta as { x: number }).x,
+						behavior: 'auto',
+					});
+				},
+				{ x: deltaX, y: deltaY },
+			);
+		}
+
+		await page.waitForTimeout(200);
+
+		const scrollPosition = (await element.evaluate((el) => {
+			const e = el as unknown as {
+				scrollTop: number;
+				scrollLeft: number;
+				scrollHeight: number;
+				clientHeight: number;
+				scrollWidth: number;
+				clientWidth: number;
+			};
+			return {
+				scrollTop: e.scrollTop,
+				scrollLeft: e.scrollLeft,
+				scrollHeight: e.scrollHeight,
+				clientHeight: e.clientHeight,
+				scrollWidth: e.scrollWidth,
+				clientWidth: e.clientWidth,
+			};
+		})) as ScrollPosition;
+
+		return { ok: true as const, scrollPosition };
+	});
+}
+
+export async function evaluateTab(
+	tabId: string,
+	tabState: TabState,
+	params: { expression: string; timeout?: number },
+): Promise<EvaluateResult> {
+	return withTabLock(tabId, async () => {
+		const page = tabState.page;
+		const timeout = Math.min(Math.max(params.timeout ?? DEFAULT_EVAL_TIMEOUT, 100), MAX_EVAL_TIMEOUT);
+
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		const timeoutPromise = new Promise<never>((_resolve, reject) => {
+			timeoutId = setTimeout(() => reject(new Error('EVAL_TIMEOUT')), timeout);
+		});
+
+		try {
+			const result = await Promise.race([page.evaluate(params.expression), timeoutPromise]);
+
+			const serialized = JSON.stringify(result);
+			if (serialized === undefined) {
+				return {
+					ok: true,
+					result,
+					resultType: typeof result,
+					truncated: false,
+				};
+			}
+
+			const truncated = serialized.length > MAX_RESULT_SIZE;
+			if (truncated) {
+				return {
+					ok: true,
+					result: `[Truncated: result was ${serialized.length} bytes, max ${MAX_RESULT_SIZE}]`,
+					resultType: 'string',
+					truncated: true,
+				};
+			}
+
+			return {
+				ok: true,
+				result,
+				resultType: result === null ? 'null' : Array.isArray(result) ? 'array' : typeof result,
+				truncated: false,
+			};
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			if (message === 'EVAL_TIMEOUT') {
+				return {
+					ok: false,
+					error: `Evaluation timed out after ${timeout}ms`,
+					errorType: 'timeout',
+				};
+			}
+			return {
+				ok: false,
+				error: message,
+				errorType: 'js_error',
+			};
+		} finally {
+			if (timeoutId) clearTimeout(timeoutId);
+		}
+	});
 }
 
 export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{

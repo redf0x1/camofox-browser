@@ -67,6 +67,46 @@ POST /tabs/:tabId/scroll
 {"userId": "agent1", "direction": "down", "amount": 500}
 ```
 
+### Scroll Element
+Scroll a specific scrollable container (modals, sidebars, overflow divs) by `ref` from snapshot or a CSS `selector`.
+
+Parameters:
+- `userId` (string) — Session owner
+- `ref` (string, optional) — Element ref like `e12` (from `/snapshot`)
+- `selector` (string, optional) — CSS selector (use `"html"` for page-level scrolling)
+- `deltaY` (number, optional) — Vertical delta (default: `300` if no `scrollTo`)
+- `deltaX` (number, optional) — Horizontal delta (default: `0`)
+- `scrollTo` (object, optional) — Absolute position: `{ "top"?: number, "left"?: number }`
+
+Auth: none
+
+```bash
+POST /tabs/:tabId/scroll-element
+{"userId": "agent1", "selector": "div.modal-body", "deltaY": 400}
+# Or absolute positioning:
+{"userId": "agent1", "ref": "e12", "scrollTo": {"top": 0}}
+```
+Returns: `{"ok": true, "scrollPosition": {"scrollTop": 400, "scrollLeft": 0, "scrollHeight": 1200, "clientHeight": 600, "scrollWidth": 800, "clientWidth": 800}}`
+
+### Evaluate JavaScript (API key required)
+Execute a JavaScript expression in the page context and return the JSON-serializable result.
+
+Parameters:
+- `userId` (string) — Session owner
+- `expression` (string, required) — JavaScript expression (max 64KB)
+- `timeout` (number, optional) — Milliseconds (min 100, max 30000, default 5000)
+
+Auth: required — `Authorization: Bearer $CAMOFOX_API_KEY` (server must have `CAMOFOX_API_KEY` set)
+
+```bash
+POST /tabs/:tabId/evaluate
+Authorization: Bearer $CAMOFOX_API_KEY
+{"userId": "agent1", "expression": "({url: window.location.href, links: document.querySelectorAll('a').length})", "timeout": 5000}
+```
+Returns (success): `{"ok": true, "result": {"url": "https://...", "links": 123}, "resultType": "object", "truncated": false}`
+
+Returns (error): `{"ok": false, "error": "...", "errorType": "js_error" | "timeout"}`
+
 ### Navigation
 ```bash
 POST /tabs/:tabId/back     {"userId": "agent1"}

@@ -26,11 +26,13 @@ import {
 	buildRefs,
 	clickTab,
 	createTabState,
+	evaluateTab,
 	forwardTab,
 	getLinks,
 	pressTab,
 	refreshTab,
 	screenshotTab,
+	scrollElementTab,
 	snapshotTab,
 	typeTab,
 	validateUrl,
@@ -462,6 +464,84 @@ router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknow
 		return res.status(500).json({ error: safeError(err) });
 	}
 });
+
+// Scroll element (selector or ref)
+router.post(
+	'/tabs/:tabId/scroll-element',
+	async (
+		req: Request<
+			{ tabId: string },
+			unknown,
+			{
+				userId?: unknown;
+				selector?: string;
+				ref?: string;
+				deltaX?: number;
+				deltaY?: number;
+				scrollTo?: { top?: number; left?: number };
+			}
+		>,
+		res: Response,
+	) => {
+		const tabId = req.params.tabId;
+		try {
+			const { userId, selector, ref, deltaX, deltaY, scrollTo } = req.body;
+			const found = findTabById(tabId, userId);
+			if (!found) return res.status(404).json({ error: 'Tab not found' });
+			const { tabState } = found;
+			tabState.toolCalls++;
+
+			const result = await scrollElementTab(tabId, tabState, { selector, ref, deltaX, deltaY, scrollTo });
+			return res.json(result);
+		} catch (err) {
+			const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'scroll-element failed', { reqId: req.reqId, tabId, error: message });
+			if (statusCode === 400) return res.status(400).json({ error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
+
+// Evaluate JS (requires API key)
+router.post(
+	'/tabs/:tabId/evaluate',
+	express.json({ limit: '64kb' }),
+	async (req: Request<{ tabId: string }, unknown, { userId?: unknown; expression?: unknown; timeout?: number }>, res: Response) => {
+		const tabId = req.params.tabId;
+		try {
+			if (!CONFIG.apiKey) {
+				return res.status(403).json({
+					error: 'JavaScript evaluation is disabled. Set CAMOFOX_API_KEY to enable this endpoint.',
+				});
+			}
+
+			if (!isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+				return res.status(403).json({ error: 'Forbidden' });
+			}
+
+			const { userId, expression, timeout } = req.body;
+			if (!expression || typeof expression !== 'string') {
+				return res.status(400).json({ error: 'expression is required and must be a string' });
+			}
+			if (expression.length > 65536) {
+				return res.status(400).json({ error: 'expression exceeds maximum length of 64KB' });
+			}
+
+			const found = findTabById(tabId, userId);
+			if (!found) return res.status(404).json({ error: 'Tab not found' });
+			const { tabState } = found;
+			tabState.toolCalls++;
+
+			const result = await evaluateTab(tabId, tabState, { expression, timeout });
+			return res.json(result);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'evaluate failed', { reqId: req.reqId, tabId, error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
 
 // Back
 router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown, { userId?: unknown }>, res: Response) => {
