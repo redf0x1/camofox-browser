@@ -173,7 +173,7 @@ router.get(
 router.get('/health', async (_req: Request, res: Response) => {
 	try {
 		const b = await ensureBrowser();
-		res.json({ ok: true, engine: 'camoufox', browserConnected: b.isConnected() });
+		res.json({ ok: true, running: b.isConnected(), engine: 'camoufox', browserConnected: b.isConnected() });
 	} catch (err) {
 		res.status(500).json({ ok: false, error: safeError(err) });
 	}

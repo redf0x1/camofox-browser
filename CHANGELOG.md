@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.2] - 2026-02-16
+
+### Fixed
+- `GET /health` now includes a `running` field for MCP `server_status` compatibility.
+
 ## [1.1.1] - 2026-02-16
 
 ### Fixed
