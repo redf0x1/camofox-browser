@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 
 import express, { Router, type Request, type Response } from 'express';
 
@@ -7,7 +8,7 @@ import { log } from '../middleware/logging';
 import { isAuthorizedWithApiKey } from '../middleware/auth';
 import { loadConfig } from '../utils/config';
 import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
-import { ensureBrowser } from '../services/browser';
+import { contextPool } from '../services/context-pool';
 import {
 	MAX_TABS_PER_SESSION,
 	findTabById,
@@ -160,8 +161,26 @@ router.get(
 // Health check
 router.get('/health', async (_req: Request, res: Response) => {
 	try {
-		const b = await ensureBrowser();
-		res.json({ ok: true, running: b.isConnected(), engine: 'camoufox', browserConnected: b.isConnected() });
+		const activeUserIds = contextPool.listActiveUserIds();
+		let profileDirsTotal = 0;
+		try {
+			profileDirsTotal = fs
+				.readdirSync(CONFIG.profilesDir, { withFileTypes: true })
+				.filter((d) => d.isDirectory())
+				.length;
+		} catch {
+			profileDirsTotal = 0;
+		}
+
+		res.json({
+			ok: true,
+			running: true,
+			engine: 'camoufox',
+			browserConnected: activeUserIds.length > 0,
+			poolSize: contextPool.size(),
+			activeUserIds,
+			profileDirsTotal,
+		});
 	} catch (err) {
 		res.status(500).json({ ok: false, error: safeError(err) });
 	}

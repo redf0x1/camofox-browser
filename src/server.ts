@@ -7,7 +7,8 @@ import openclawRoutes from './routes/openclaw';
 import { installCrashHandlers, safeError } from './middleware/errors';
 import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
 import { loadConfig } from './utils/config';
-import { closeBrowser, ensureBrowser, getBrowser } from './services/browser';
+import { closeBrowser } from './services/browser';
+import { contextPool } from './services/context-pool';
 import { closeAllSessions, countTotalTabsForSessions, getAllSessions, startCleanupInterval } from './services/session';
 
 const CONFIG = loadConfig();
@@ -33,7 +34,7 @@ startCleanupInterval();
 startStatsBeacon(() => {
 	const sessions = getAllSessions().size;
 	const tabs = countTotalTabsForSessions();
-	const browserConnected = getBrowser()?.isConnected() ?? false;
+	const browserConnected = contextPool.size() > 0;
 	return { sessions, tabs, rssBytes: 0, heapUsedBytes: 0, uptimeSeconds: 0, browserConnected };
 });
 
@@ -68,14 +69,11 @@ process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 
 server = app.listen(PORT, () => {
 	log('info', 'server started', { port: PORT, pid: process.pid, nodeVersion: process.version });
+	log('info', 'using persistent profiles', { profilesDir: CONFIG.profilesDir });
 	if (!CONFIG.apiKey) {
 		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — all endpoints are open without authentication.');
 		console.warn('[camofox] Set CAMOFOX_API_KEY for production/network-exposed deployments.');
 	}
-	ensureBrowser().catch((err) => {
-		const message = err instanceof Error ? err.message : String(err);
-		log('error', 'browser pre-launch failed', { error: message });
-	});
 });
 
 server.on('error', (err: NodeJS.ErrnoException) => {

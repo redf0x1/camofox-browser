@@ -1,11 +1,10 @@
 import type { BrowserContextOptions } from 'playwright-core';
 
-import { contextHash } from '../utils/presets';
 import type { ContextOverrides, SessionData, TabState } from '../types';
 import { log } from '../middleware/logging';
-import { ensureBrowser } from './browser';
 import { clearTabLock, clearAllTabLocks } from './tab';
 import { loadConfig } from '../utils/config';
+import { contextPool } from './context-pool';
 
 const CONFIG = loadConfig();
 
@@ -13,9 +12,32 @@ const CONFIG = loadConfig();
 // Note: sessionKey was previously called listItemId - both are accepted for backward compatibility
 const sessions = new Map<string, SessionData>();
 
+// sessionKey -> in-flight session creation promise
+// Avoids storing partially-initialized sessions (e.g., context: null cast) and dedupes concurrent creates.
+const launchingSessions = new Map<string, Promise<SessionData>>();
+
 // tabId -> sessions map key
-// Sessions may be keyed by composite `${userId}:${contextHash}`, while tab endpoints only get tabId.
+// Persistent profiles are keyed only by userId, while tab endpoints only get tabId.
 const tabSessionIndex = new Map<string, string>();
+
+function cleanupSessionsForUserId(userId: string, reason: string): void {
+	const prefix = normalizeUserId(userId);
+	// If a session is currently being created, drop our reference so callers don't keep a stale placeholder.
+	launchingSessions.delete(prefix);
+
+	for (const [key, session] of sessions) {
+		if (key === prefix || key.startsWith(prefix + ':')) {
+			unindexSessionTabs(session);
+			sessions.delete(key);
+			log('info', 'session cleaned up', { userId: key, reason });
+		}
+	}
+}
+
+contextPool.onEvict((userId) => {
+	cleanupSessionsForUserId(userId, 'context_evicted');
+	// Note: the pool will close the context; session cleanup only removes dead Page references.
+});
 
 export const SESSION_TIMEOUT_MS = Math.max(60000, Number.parseInt(process.env.CAMOFOX_SESSION_TIMEOUT || '', 10) || 1800000);
 export const MAX_SESSIONS = Math.max(1, Number.parseInt(process.env.CAMOFOX_MAX_SESSIONS || '', 10) || 50);
@@ -26,7 +48,9 @@ export function normalizeUserId(userId: unknown): string {
 }
 
 export function getSessionMapKey(userId: unknown, contextOverrides: ContextOverrides | null | undefined): string {
-	return normalizeUserId(userId) + contextHash(contextOverrides ?? null);
+	// Persistent profiles are keyed only by userId; overrides are applied on first launch.
+	void contextOverrides;
+	return normalizeUserId(userId);
 }
 
 export function getSessionsForUser(userId: unknown): Array<[string, SessionData]> {
@@ -125,37 +149,60 @@ export async function getSession(userId: unknown, contextOverrides?: ContextOver
 	const key = getSessionMapKey(userId, contextOverrides);
 	let session = sessions.get(key);
 
-	if (!session) {
-		if (sessions.size >= MAX_SESSIONS) {
-			throw new Error('Maximum concurrent sessions reached');
-		}
-		const b = await ensureBrowser();
-		const resolved = contextOverrides || {};
+	const resolved = contextOverrides || {};
 
-		const contextOptions: BrowserContextOptions = {
-			viewport: resolved.viewport || { width: 1280, height: 720 },
-			permissions: ['geolocation'],
-		};
+	const contextOptions: BrowserContextOptions = {
+		viewport: resolved.viewport || { width: 1280, height: 720 },
+		permissions: ['geolocation'],
+	};
 
-		const hasOverrides = !!(
-			contextOverrides &&
-			(contextOverrides.locale !== undefined || contextOverrides.timezoneId !== undefined || contextOverrides.geolocation !== undefined)
-		);
+	const hasOverrides = !!(
+		contextOverrides &&
+		(contextOverrides.locale !== undefined || contextOverrides.timezoneId !== undefined || contextOverrides.geolocation !== undefined)
+	);
 
-		// With proxy+geoip, camoufox auto-configures locale/timezone/geo from proxy IP.
-		// If caller explicitly supplies overrides, apply them even when proxy is active.
-		if (!CONFIG.proxy.host || hasOverrides) {
-			contextOptions.locale = resolved.locale || 'en-US';
-			contextOptions.timezoneId = resolved.timezoneId || 'America/Los_Angeles';
-			contextOptions.geolocation = resolved.geolocation || { latitude: 37.7749, longitude: -122.4194 };
-		}
-
-		const context = await b.newContext(contextOptions);
-		session = { context, tabGroups: new Map(), lastAccess: Date.now() };
-		sessions.set(key, session);
-		log('info', 'session created', { userId: key });
+	// With proxy+geoip, camoufox auto-configures locale/timezone/geo from proxy IP.
+	// If caller explicitly supplies overrides, apply them even when proxy is active.
+	if (!CONFIG.proxy.host || hasOverrides) {
+		contextOptions.locale = resolved.locale || 'en-US';
+		contextOptions.timezoneId = resolved.timezoneId || 'America/Los_Angeles';
+		contextOptions.geolocation = resolved.geolocation || { latitude: 37.7749, longitude: -122.4194 };
 	}
 
+	if (!session) {
+		const existingLaunch = launchingSessions.get(key);
+		if (existingLaunch) {
+			session = await existingLaunch;
+			session.lastAccess = Date.now();
+			return session;
+		}
+
+		if (sessions.size + launchingSessions.size >= MAX_SESSIONS) {
+			throw new Error('Maximum concurrent sessions reached');
+		}
+
+		const launchPromise = (async (): Promise<SessionData> => {
+			const entry = await contextPool.ensureContext(normalizeUserId(userId), contextOptions);
+			const created: SessionData = { context: entry.context, tabGroups: new Map(), lastAccess: Date.now() };
+			sessions.set(key, created);
+			log('info', 'session created', { userId: key });
+			return created;
+		})();
+
+		launchingSessions.set(key, launchPromise);
+		try {
+			session = await launchPromise;
+		} finally {
+			launchingSessions.delete(key);
+		}
+	} else {
+		// Re-resolve context on each access; ContextPool de-dupes launches and detects unexpected closes.
+		const entry = await contextPool.ensureContext(normalizeUserId(userId), contextOptions);
+		session.context = entry.context;
+		session.lastAccess = Date.now();
+	}
+
+	// For newly created sessions, lastAccess/context are already set.
 	session.lastAccess = Date.now();
 	return session;
 }
@@ -177,22 +224,17 @@ export function clearAllState(): void {
 
 export async function closeSessionsForUser(userId: string): Promise<void> {
 	const prefix = userId;
-	for (const [key, session] of sessions) {
-		if (key === prefix || key.startsWith(prefix + ':')) {
-			await session.context.close().catch(() => {});
-			unindexSessionTabs(session);
-			sessions.delete(key);
-			log('info', 'session closed', { userId: key });
-		}
-	}
+	await contextPool.closeContext(prefix).catch(() => {});
+	cleanupSessionsForUserId(prefix, 'explicit_close');
 }
 
 export async function closeAllSessions(): Promise<void> {
+	await contextPool.closeAll().catch(() => {});
 	for (const [userId, session] of sessions) {
-		await session.context.close().catch(() => {});
 		unindexSessionTabs(session);
 		sessions.delete(userId);
 	}
+	launchingSessions.clear();
 }
 
 let cleanupInterval: NodeJS.Timeout | null = null;
@@ -203,7 +245,8 @@ export function startCleanupInterval(): NodeJS.Timeout {
 		const now = Date.now();
 		for (const [sessionKey, session] of sessions) {
 			if (now - session.lastAccess > SESSION_TIMEOUT_MS) {
-				session.context.close().catch(() => {});
+				// Persistent profile is preserved on disk; closing the context frees resources.
+				contextPool.closeContext(sessionKey).catch(() => {});
 				unindexSessionTabs(session);
 				sessions.delete(sessionKey);
 				log('info', 'session expired', { userId: sessionKey });

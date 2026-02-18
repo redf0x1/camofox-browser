@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0] - 2026-02-18
+
+### Added
+- **Persistent browser profiles**: Each userId gets a real Firefox profile directory that auto-persists ALL browser state (cookies, localStorage, IndexedDB, Service Workers, cache)
+- New `CAMOFOX_PROFILES_DIR` environment variable for custom profile storage location (default: `~/.camofox/profiles`)
+- Context pool manager with LRU eviction and eviction callbacks
+- Health endpoint now reports pool stats (poolSize, activeUserIds, profileDirsTotal)
+
+### Changed
+- Browser contexts are now backed by persistent Firefox profile directories instead of ephemeral in-memory contexts
+- Session management refactored to use context pool
+- Removed singleton browser pattern in favor of per-user browser processes
+
+### Fixed
+- Telegram and other IndexedDB-based sites now maintain login sessions across restarts
+- Session eviction properly cleans up tab references
+
 ## [1.2.0] - 2026-02-18
 
 ### Changed

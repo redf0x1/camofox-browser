@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 
 import { Router, type Request, type Response } from 'express';
 import type { Locator } from 'playwright-core';
@@ -7,9 +8,11 @@ import { safeError } from '../middleware/errors';
 import { log } from '../middleware/logging';
 import { isAuthorizedWithAdminKey } from '../middleware/auth';
 import { loadConfig } from '../utils/config';
-import { ensureBrowser, getBrowser, closeBrowser } from '../services/browser';
+import { closeBrowser } from '../services/browser';
+import { contextPool } from '../services/context-pool';
 import {
 	MAX_TABS_PER_SESSION,
+	closeAllSessions,
 	clearAllState,
 	countTotalTabsForSessions,
 	findTabById,
@@ -35,13 +38,26 @@ function isLoadState(value: string): value is LoadStateLike {
 // GET / - Status (alias for GET /health)
 router.get('/', async (_req: Request, res: Response) => {
 	try {
-		const b = await ensureBrowser();
+		const activeUserIds = contextPool.listActiveUserIds();
+		let profileDirsTotal = 0;
+		try {
+			profileDirsTotal = fs
+				.readdirSync(CONFIG.profilesDir, { withFileTypes: true })
+				.filter((d) => d.isDirectory())
+				.length;
+		} catch {
+			profileDirsTotal = 0;
+		}
+
 		res.json({
 			ok: true,
 			enabled: true,
-			running: b.isConnected(),
+			running: true,
 			engine: 'camoufox',
-			browserConnected: b.isConnected(),
+			browserConnected: activeUserIds.length > 0,
+			poolSize: contextPool.size(),
+			activeUserIds,
+			profileDirsTotal,
 		});
 	} catch (err) {
 		res.status(500).json({ ok: false, error: safeError(err) });
@@ -98,7 +114,6 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 // POST /start - Start browser (OpenClaw expects this)
 router.post('/start', async (_req: Request, res: Response) => {
 	try {
-		await ensureBrowser();
 		res.json({ ok: true, profile: 'camoufox' });
 	} catch (err) {
 		res.status(500).json({ ok: false, error: safeError(err) });
@@ -112,9 +127,8 @@ router.post('/stop', async (req: Request, res: Response) => {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
 
-		if (getBrowser()) {
-			await closeBrowser();
-		}
+		await closeAllSessions();
+		await closeBrowser();
 		clearAllState();
 		res.json({ ok: true, stopped: true, profile: 'camoufox' });
 	} catch (err) {
