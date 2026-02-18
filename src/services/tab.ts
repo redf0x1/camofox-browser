@@ -1,8 +1,31 @@
 import type { Locator, Page } from 'playwright-core';
 
-import { expandMacro } from '../utils/macros';
 import type { EvaluateResult, RefInfo, ScrollPosition, TabState, WaitForPageReadyOptions } from '../types';
 import { log } from '../middleware/logging';
+
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout>;
+	return Promise.race([
+		promise.finally(() => clearTimeout(timer)),
+		new Promise<T>((_, reject) => {
+			timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+		}),
+	]);
+}
+
+const PAGE_CLOSE_TIMEOUT_MS = 5000;
+
+export async function safePageClose(page: Page): Promise<void> {
+	try {
+		await Promise.race([
+			page.close(),
+			new Promise<void>((resolve) => setTimeout(resolve, PAGE_CLOSE_TIMEOUT_MS)),
+		]);
+	} catch (e: unknown) {
+		const msg = e instanceof Error ? e.message : String(e);
+		console.warn(`[camofox] page close failed: ${msg}`);
+	}
+}
 
 const ALLOWED_URL_SCHEMES: ReadonlyArray<'http:' | 'https:'> = ['http:', 'https:'];
 
@@ -230,13 +253,19 @@ export async function buildRefs(page: Page): Promise<Map<string, RefInfo>> {
 
 	await waitForPageReady(page, { waitForNetwork: false });
 
-	let ariaYaml: string | null;
+	let ariaYaml: string | null = null;
 	try {
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 5000 });
 	} catch {
-		log('warn', 'ariaSnapshot failed, retrying');
-		await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
+		// Retry once
+		try {
+			await page.waitForLoadState('load', { timeout: 3000 }).catch(() => {});
+			ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 5000 });
+		} catch (retryErr: unknown) {
+			const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+			console.warn(`[camofox] ariaSnapshot retry failed, returning empty refs: ${msg}`);
+			return refs;
+		}
 	}
 
 	if (!ariaYaml) {
@@ -277,7 +306,13 @@ export async function buildRefs(page: Page): Promise<Map<string, RefInfo>> {
 export async function getAriaSnapshot(page: Page): Promise<string | null> {
 	if (!page || page.isClosed()) return null;
 	await waitForPageReady(page, { waitForNetwork: false });
-	return page.locator('body').ariaSnapshot({ timeout: 10000 });
+	try {
+		return await page.locator('body').ariaSnapshot({ timeout: 5000 });
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[camofox] getAriaSnapshot failed: ${msg}`);
+		return null;
+	}
 }
 
 export function refToLocator(page: Page, ref: string, refs: Map<string, RefInfo>): Locator | null {
@@ -297,32 +332,6 @@ export function createTabState(page: Page): TabState {
 		visitedUrls: new Set(),
 		toolCalls: 0,
 	};
-}
-
-export async function navigateTab(tabId: string, tabState: TabState, params: { url?: string; macro?: string; query?: string }): Promise<{ ok: true; url: string }>{
-	const { url, macro, query } = params;
-	let targetUrl = url;
-	if (macro) {
-		targetUrl = expandMacro(macro, query) || url;
-	}
-	if (!targetUrl) {
-		throw new Error('url or macro required');
-	}
-
-	const urlErr = validateUrl(targetUrl);
-	if (urlErr) {
-		const err = new Error(urlErr);
-		// Used by routes to map to 400.
-		(err as Error & { statusCode?: number }).statusCode = 400;
-		throw err;
-	}
-
-	return withTabLock(tabId, async () => {
-		await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-		tabState.visitedUrls.add(targetUrl);
-		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url() };
-	});
 }
 
 export async function snapshotTab(tabState: TabState): Promise<{ url: string; snapshot: string; refsCount: number }>{
@@ -456,14 +465,6 @@ export async function pressTab(tabId: string, tabState: TabState, key: string): 
 	return { ok: true as const };
 }
 
-export async function scrollTab(tabState: TabState, params: { direction?: 'up' | 'down'; amount?: number }): Promise<{ ok: true }>{
-	const { direction = 'down', amount = 500 } = params;
-	const delta = direction === 'up' ? -amount : amount;
-	await tabState.page.mouse.wheel(0, delta);
-	await tabState.page.waitForTimeout(300);
-	return { ok: true as const };
-}
-
 export async function scrollElementTab(
 	tabId: string,
 	tabState: TabState,
@@ -562,14 +563,8 @@ export async function evaluateTab(
 	return withTabLock(tabId, async () => {
 		const page = tabState.page;
 		const timeout = Math.min(Math.max(params.timeout ?? DEFAULT_EVAL_TIMEOUT, 100), MAX_EVAL_TIMEOUT);
-
-		let timeoutId: ReturnType<typeof setTimeout> | undefined;
-		const timeoutPromise = new Promise<never>((_resolve, reject) => {
-			timeoutId = setTimeout(() => reject(new Error('EVAL_TIMEOUT')), timeout);
-		});
-
 		try {
-			const result = await Promise.race([page.evaluate(params.expression), timeoutPromise]);
+			const result = await withTimeout(page.evaluate(params.expression), timeout, 'evaluate');
 
 			const serialized = JSON.stringify(result);
 			if (serialized === undefined) {
@@ -599,7 +594,7 @@ export async function evaluateTab(
 			};
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
-			if (message === 'EVAL_TIMEOUT') {
+			if (message === `evaluate timed out after ${timeout}ms`) {
 				return {
 					ok: false,
 					error: `Evaluation timed out after ${timeout}ms`,
@@ -611,8 +606,6 @@ export async function evaluateTab(
 				error: message,
 				errorType: 'js_error',
 			};
-		} finally {
-			if (timeoutId) clearTimeout(timeoutId);
 		}
 	});
 }
@@ -674,9 +667,4 @@ export async function getLinks(
 export async function screenshotTab(tabState: TabState, fullPage: boolean): Promise<Buffer> {
 	const buffer = await tabState.page.screenshot({ type: 'png', fullPage });
 	return buffer as Buffer;
-}
-
-export async function waitTab(tabState: TabState, params: { timeout: number; waitForNetwork: boolean }): Promise<{ ok: true; ready: boolean }>{
-	const ready = await waitForPageReady(tabState.page, { timeout: params.timeout, waitForNetwork: params.waitForNetwork });
-	return { ok: true as const, ready };
 }

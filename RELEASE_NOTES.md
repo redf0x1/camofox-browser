@@ -28,4 +28,5 @@
 - Unused import/any type violations
 
 ### Credits
-Based on [camofox-browser](https://github.com/jo-inc/camofox-browser) by Jo Inc (YC W24)
+- [Camoufox](https://camoufox.com) — Firefox-based browser with anti-detection
+- [OpenClaw](https://openclaw.ai) — compatibility endpoints

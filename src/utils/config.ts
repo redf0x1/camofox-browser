@@ -37,6 +37,8 @@ export interface AppConfig {
   apiKey: string;
   cookiesDir: string;
   profilesDir: string;
+  handlerTimeoutMs: number;
+  maxConcurrentPerUser: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
 }
@@ -49,12 +51,20 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_API_KEY?: string;
   CAMOFOX_COOKIES_DIR?: string;
   CAMOFOX_PROFILES_DIR?: string;
+  HANDLER_TIMEOUT_MS?: string;
+  MAX_CONCURRENT_PER_USER?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
   PROXY_PASSWORD?: string;
   PATH?: string;
   HOME?: string;
+}
+
+function parsePositiveIntOrDefault(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
 }
 
 function parsePort(raw: string, source: string): number {
@@ -86,6 +96,9 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   mkdirSync(cookiesDir, { recursive: true });
   mkdirSync(profilesDir, { recursive: true });
 
+  const handlerTimeoutMs = parsePositiveIntOrDefault(env.HANDLER_TIMEOUT_MS, 30000);
+  const maxConcurrentPerUser = parsePositiveIntOrDefault(env.MAX_CONCURRENT_PER_USER, 3);
+
   return {
     port,
     nodeEnv: env.NODE_ENV || 'development',
@@ -93,6 +106,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     apiKey: env.CAMOFOX_API_KEY || '',
     cookiesDir,
     profilesDir,
+    handlerTimeoutMs,
+    maxConcurrentPerUser,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',

@@ -21,6 +21,7 @@ import {
 	unindexTab,
 	closeSessionsForUser,
 	countTotalTabsForSessions,
+	withUserLimit,
 } from '../services/session';
 import {
 	backTab,
@@ -36,8 +37,10 @@ import {
 	scrollElementTab,
 	snapshotTab,
 	typeTab,
+	safePageClose,
 	validateUrl,
 	waitForPageReady,
+	withTimeout,
 	withTabLock,
 } from '../services/tab';
 
@@ -314,28 +317,35 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 	const tabId = req.params.tabId;
 	try {
 		const { userId, url, macro, query } = req.body;
+		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 
 		const { tabState } = found;
 		tabState.toolCalls++;
 
-		const result = await withTabLock(tabId, async () => {
-			let targetUrl = url;
-			if (macro) {
-				// Reuse the same macro expansion as the legacy server implementation.
-				targetUrl = (await import('../utils/macros')).expandMacro(macro, query) || url;
-			}
-			if (!targetUrl) return { status: 400 as const, body: { error: 'url or macro required' } };
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(tabId, async () => {
+					let targetUrl = url;
+					if (macro) {
+						// Reuse the same macro expansion as the legacy server implementation.
+						targetUrl = (await import('../utils/macros')).expandMacro(macro, query) || url;
+					}
+					if (!targetUrl) return { status: 400 as const, body: { error: 'url or macro required' } };
 
-			const urlErr = validateUrl(targetUrl);
-			if (urlErr) return { status: 400 as const, body: { error: urlErr } };
+					const urlErr = validateUrl(targetUrl);
+					if (urlErr) return { status: 400 as const, body: { error: urlErr } };
 
-			await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-			tabState.visitedUrls.add(targetUrl);
-			tabState.refs = await buildRefs(tabState.page);
-			return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
-		});
+					await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					tabState.visitedUrls.add(targetUrl);
+					tabState.refs = await buildRefs(tabState.page);
+					return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
+				}),
+				CONFIG.handlerTimeoutMs,
+				'navigate',
+			),
+		);
 
 		if (result.status !== 200) return res.status(result.status).json(result.body);
 
@@ -344,7 +354,8 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'navigate failed', { reqId: req.reqId, tabId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		const status = err instanceof Error && err.message?.startsWith('Blocked URL scheme') ? 400 : 500;
+		return res.status(status).json({ error: safeError(err) });
 	}
 });
 
@@ -352,13 +363,16 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown }>, res: Response) => {
 	try {
 		const userId = req.query.userId;
+		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const tabId = req.params.tabId;
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const result = await snapshotTab(tabState);
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(snapshotTab(tabState), CONFIG.handlerTimeoutMs, 'snapshot'),
+		);
 		log('info', 'snapshot', {
 			reqId: req.reqId,
 			tabId,
@@ -396,12 +410,14 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 	const tabId = req.params.tabId;
 	try {
 		const { userId, ref, selector } = req.body;
+		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-
-		const result = await clickTab(tabId, tabState, { ref, selector });
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(clickTab(tabId, tabState, { ref, selector }), CONFIG.handlerTimeoutMs, 'click'),
+		);
 		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });
 		return res.json(result);
 	} catch (err) {
@@ -423,8 +439,7 @@ router.post('/tabs/:tabId/type', async (req: Request<{ tabId: string }, unknown,
 
 		const { tabState } = found;
 		tabState.toolCalls++;
-
-		const result = await typeTab(tabId, tabState, { ref, selector, text: String(text ?? '') });
+		const result = await withTimeout(typeTab(tabId, tabState, { ref, selector, text: String(text ?? '') }), CONFIG.handlerTimeoutMs, 'type');
 		return res.json(result);
 	} catch (err) {
 		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
@@ -444,7 +459,7 @@ router.post('/tabs/:tabId/press', async (req: Request<{ tabId: string }, unknown
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-		await pressTab(tabId, tabState, String(key ?? ''));
+		await withTimeout(pressTab(tabId, tabState, String(key ?? '')), CONFIG.handlerTimeoutMs, 'press');
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -553,7 +568,7 @@ router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown,
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const result = await backTab(tabId, tabState);
+		const result = await withTimeout(backTab(tabId, tabState), CONFIG.handlerTimeoutMs, 'back');
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -571,7 +586,7 @@ router.post('/tabs/:tabId/forward', async (req: Request<{ tabId: string }, unkno
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const result = await forwardTab(tabId, tabState);
+		const result = await withTimeout(forwardTab(tabId, tabState), CONFIG.handlerTimeoutMs, 'forward');
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -589,7 +604,7 @@ router.post('/tabs/:tabId/refresh', async (req: Request<{ tabId: string }, unkno
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const result = await refreshTab(tabId, tabState);
+		const result = await withTimeout(refreshTab(tabId, tabState), CONFIG.handlerTimeoutMs, 'refresh');
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -668,7 +683,7 @@ router.delete('/tabs/:tabId', async (req: Request<{ tabId: string }, unknown, { 
 		const { userId } = req.body;
 		const found = findTabById(req.params.tabId, userId);
 		if (found) {
-			await found.tabState.page.close();
+			await safePageClose(found.tabState.page);
 			found.group.delete(req.params.tabId);
 			unindexTab(req.params.tabId);
 			if (found.group.size === 0) {
@@ -693,7 +708,7 @@ router.delete('/tabs/group/:listItemId', async (req: Request<{ listItemId: strin
 			const group = session?.tabGroups.get(req.params.listItemId);
 			if (!group) continue;
 			for (const [tabId, tabState] of group) {
-				await tabState.page.close().catch(() => {});
+				await safePageClose(tabState.page);
 				unindexTab(tabId);
 			}
 			session.tabGroups.delete(req.params.listItemId);

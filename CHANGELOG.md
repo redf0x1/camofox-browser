@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.4.0] - 2026-02-18
+
+### Added
+- `withTimeout()` utility — configurable handler timeout (default 30s, env: `HANDLER_TIMEOUT_MS`)
+- `withUserLimit()` — per-user concurrency limiter (default 3, env: `MAX_CONCURRENT_PER_USER`)
+- `safePageClose()` — safe page close with 5s timeout, prevents hung close operations
+- Unit tests for all new utility functions
+
+### Changed
+- ariaSnapshot timeout reduced 10s → 5s for faster failure detection
+- ariaSnapshot retry now catches failures gracefully (returns empty refs instead of crashing)
+- `getAriaSnapshot()` returns null on failure instead of throwing
+- Navigate endpoint returns 400 (not 500) for blocked URL schemes
+- All core handlers wrapped with `withTimeout` for request-level timeout protection
+- Navigate, snapshot, click handlers wrapped with `withUserLimit` for per-user concurrency control
+- OpenClaw /navigate, /act, /snapshot handlers wrapped with `withTimeout` + `withUserLimit`
+- All page.close() calls replaced with `safePageClose()`
+- userId validation added to navigate, snapshot, click endpoints (returns 400 if missing)
+
+### Removed
+- Dead code: unused `navigateTab()`, `scrollTab()`, `waitTab()` exports
+
+### Security
+- Blocked URL scheme detection returns proper 400 status code
+
 ## [1.3.0] - 2026-02-18
 
 ### Added

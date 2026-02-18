@@ -20,6 +20,57 @@ const launchingSessions = new Map<string, Promise<SessionData>>();
 // Persistent profiles are keyed only by userId, while tab endpoints only get tabId.
 const tabSessionIndex = new Map<string, string>();
 
+const userConcurrency = new Map<string, { active: number; queue: Array<() => void> }>();
+
+export function __getUserConcurrencyStateForTests(userId: string): { active: number; queueLength: number } | null {
+	const key = String(userId).toLowerCase().trim();
+	const state = userConcurrency.get(key);
+	if (!state) return null;
+	return { active: state.active, queueLength: state.queue.length };
+}
+
+export async function withUserLimit<T>(
+	userId: string,
+	maxConcurrent: number,
+	operation: () => Promise<T>,
+): Promise<T> {
+	const key = String(userId).toLowerCase().trim();
+	let state = userConcurrency.get(key);
+	if (!state) {
+		state = { active: 0, queue: [] };
+		userConcurrency.set(key, state);
+	}
+
+	if (state.active >= maxConcurrent) {
+		await new Promise<void>((resolve, reject) => {
+			const callback = (): void => {
+				clearTimeout(timer);
+				resolve();
+			};
+			const timer = setTimeout(() => {
+				const idx = state!.queue.indexOf(callback);
+				if (idx !== -1) state!.queue.splice(idx, 1);
+				reject(new Error('User concurrency limit reached, try again'));
+			}, 30000);
+			state!.queue.push(callback);
+		});
+	}
+
+	state.active++;
+	try {
+		return await operation();
+	} finally {
+		state.active--;
+		if (state.queue.length > 0) {
+			const next = state.queue.shift()!;
+			next();
+		}
+		if (state.active === 0 && state.queue.length === 0) {
+			userConcurrency.delete(key);
+		}
+	}
+}
+
 function cleanupSessionsForUserId(userId: string, reason: string): void {
 	const prefix = normalizeUserId(userId);
 	// If a session is currently being created, drop our reference so callers don't keep a stale placeholder.
@@ -220,6 +271,7 @@ export function clearAllState(): void {
 	sessions.clear();
 	tabSessionIndex.clear();
 	clearAllTabLocks();
+	userConcurrency.clear();
 }
 
 export async function closeSessionsForUser(userId: string): Promise<void> {

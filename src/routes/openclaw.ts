@@ -21,8 +21,20 @@ import {
 	getTabGroup,
 	indexTab,
 	unindexTab,
+	withUserLimit,
 } from '../services/session';
-import { annotateAriaYamlWithRefs, buildRefs, createTabState, getAriaSnapshot, refToLocator, smartFill, validateUrl, withTabLock } from '../services/tab';
+import {
+	annotateAriaYamlWithRefs,
+	buildRefs,
+	createTabState,
+	getAriaSnapshot,
+	refToLocator,
+	safePageClose,
+	smartFill,
+	validateUrl,
+	withTabLock,
+	withTimeout,
+} from '../services/tab';
 
 const CONFIG = loadConfig();
 
@@ -158,12 +170,18 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 		const { tabState } = found;
 		tabState.toolCalls++;
 
-		const result = await withTabLock(String(targetId), async () => {
-			await tabState.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-			tabState.visitedUrls.add(url);
-			tabState.refs = await buildRefs(tabState.page);
-			return { ok: true, targetId, url: tabState.page.url() };
-		});
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(String(targetId), async () => {
+					await tabState.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					tabState.visitedUrls.add(url);
+					tabState.refs = await buildRefs(tabState.page);
+					return { ok: true, targetId, url: tabState.page.url() };
+				}),
+				CONFIG.handlerTimeoutMs,
+				'openclaw-navigate',
+			),
+		);
 
 		return res.json(result);
 	} catch (err) {
@@ -188,18 +206,25 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 
 		const { tabState } = found;
 		tabState.toolCalls++;
-		tabState.refs = await buildRefs(tabState.page);
 
-		const ariaYaml = await getAriaSnapshot(tabState.page);
-		const annotatedYaml = annotateAriaYamlWithRefs(ariaYaml, tabState.refs);
+		const result = await withTimeout(
+			(async () => {
+				tabState.refs = await buildRefs(tabState.page);
+				const ariaYaml = await getAriaSnapshot(tabState.page);
+				const annotatedYaml = annotateAriaYamlWithRefs(ariaYaml, tabState.refs);
+				return { url: tabState.page.url(), snapshot: annotatedYaml, refsCount: tabState.refs.size };
+			})(),
+			CONFIG.handlerTimeoutMs,
+			'openclaw-snapshot',
+		);
 
 		return res.json({
 			ok: true,
 			format: 'aria',
 			targetId,
-			url: tabState.page.url(),
-			snapshot: annotatedYaml,
-			refsCount: tabState.refs.size,
+			url: result.url,
+			snapshot: result.snapshot,
+			refsCount: result.refsCount,
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -272,7 +297,9 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 		const { tabState } = found;
 		tabState.toolCalls++;
 
-		const result = await withTabLock(targetId, async () => {
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(targetId, async () => {
 			switch (kind) {
 				case 'click': {
 					const params = body as unknown as ActClickRequest;
@@ -389,7 +416,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 				}
 
 				case 'close': {
-					await tabState.page.close();
+					await safePageClose(tabState.page);
 					found.group.delete(String(targetId));
 					unindexTab(String(targetId));
 					if (found.group.size === 0) {
@@ -401,7 +428,11 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 				default:
 					throw new Error(`Unsupported action kind: ${kind}`);
 			}
-		});
+				}),
+				CONFIG.handlerTimeoutMs,
+				'act',
+			),
+		);
 
 		return res.json(result);
 	} catch (err) {
