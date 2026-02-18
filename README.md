@@ -42,6 +42,7 @@
 - **C++ Anti-Detection** — fingerprint spoofing at the Camoufox engine level (not JS injection)
 - **REST API** — language-agnostic HTTP endpoints for browser automation and AI agent integration
 - **Multi-Session** — concurrent isolated browser contexts per `userId` (defaults: max 50 sessions, max 10 tabs/session)
+- **Persistent Browser Profiles** — Each user gets a dedicated Firefox profile. Cookies, localStorage, IndexedDB, and all browser storage persist across sessions automatically.
 - **Geo Presets** — 8 built-in region presets (locale/timezone/geolocation) + custom presets file
 - **14 Search Macros** — Google, YouTube, Amazon, Reddit (search + subreddit JSON), Wikipedia, Twitter, Yelp, Spotify, Netflix, LinkedIn, Instagram, TikTok, Twitch
 - **Element Refs** — accessibility snapshots annotated with stable `eN` element references for precise interaction
@@ -84,6 +85,17 @@ npx camofox-browser
 docker build -t camofox-browser .
 docker run -p 9377:9377 camofox-browser
 ```
+
+To persist browser profiles (cookies, localStorage, IndexedDB, etc.) across container restarts:
+
+```bash
+docker run -d \
+  -p 9377:9377 \
+  -v ~/.camofox:/home/node/.camofox \
+  ghcr.io/redf0x1/camofox-browser:latest
+```
+
+The volume mount `-v ~/.camofox:/home/node/.camofox` ensures profiles persist across container restarts.
 
 ### Using Docker Compose
 
@@ -131,6 +143,12 @@ AI Agent (MCP / OpenClaw / REST Client)
 │   Firefox fork + engine-level spoofing   │
 └──────────────────────────────────────────┘
 ```
+
+### Persistent Profiles (v1.3.0+)
+
+- Each `userId` runs in its own persistent Firefox process/context (backed by `launchPersistentContext(userDataDir)`)
+- Profile data is stored at `~/.camofox/profiles/{userId}/` (override via `CAMOFOX_PROFILES_DIR`)
+- Idle user contexts are closed via LRU eviction (profile data remains on disk)
 
 ## API Reference
 
@@ -234,6 +252,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
 | `CAMOFOX_API_KEY` | (empty) | Enables cookie import endpoint; sent via `Authorization: Bearer ...` |
 | `CAMOFOX_COOKIES_DIR` | `~/.camofox/cookies` | Directory used by the OpenClaw plugin cookie tool |
+| `CAMOFOX_PROFILES_DIR` | `~/.camofox/profiles` | Profile storage directory (persistent per-user Firefox profiles) |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |
 | `CAMOFOX_SESSION_TIMEOUT` | `1800000` | Session idle timeout in ms (min `60000`) |
 | `CAMOFOX_MAX_SESSIONS` | `50` | Maximum concurrent sessions |
@@ -250,6 +269,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 ```bash
 docker build -t camofox-browser .
 docker run -p 9377:9377 \
+  -v ~/.camofox:/home/node/.camofox \
   -e CAMOFOX_PORT=9377 \
   camofox-browser
 ```
@@ -299,7 +319,7 @@ src/
 │   ├── core.ts         # Core REST API (~21 endpoints)
 │   └── openclaw.ts     # OpenClaw compatibility (~7 endpoints)
 ├── services/
-│   ├── browser.ts      # Browser lifecycle (singleton)
+│   ├── browser.ts      # Browser lifecycle + persistent context pool
 │   ├── session.ts      # Session management + limits
 │   └── tab.ts          # Tab operations (snapshot/click/type/etc.)
 ├── middleware/         # Auth, logging, errors
