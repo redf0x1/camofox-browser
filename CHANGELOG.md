@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.0] - 2026-02-18
+
+### Changed
+- Cookie import, cookie export, and evaluate endpoints are now **open by default** when `CAMOFOX_API_KEY` is not set (previously returned 403).
+- Authentication is enforced only when `CAMOFOX_API_KEY` is configured — API key is now an opt-in security layer.
+- Added startup warning when running without API key for network-exposed deployments.
+
+### Fixed
+- `GET /health` now includes a `running` field for MCP `server_status` compatibility.
+
 ## [1.1.2] - 2026-02-16
 
 ### Fixed

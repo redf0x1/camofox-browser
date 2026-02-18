@@ -68,6 +68,10 @@ process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 
 server = app.listen(PORT, () => {
 	log('info', 'server started', { port: PORT, pid: process.pid, nodeVersion: process.version });
+	if (!CONFIG.apiKey) {
+		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — all endpoints are open without authentication.');
+		console.warn('[camofox] Set CAMOFOX_API_KEY for production/network-exposed deployments.');
+	}
 	ensureBrowser().catch((err) => {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'browser pre-launch failed', { error: message });

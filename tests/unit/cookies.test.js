@@ -332,13 +332,14 @@ describe('Cookie endpoint - without API key', () => {
     await stopServer();
   }, 30000);
 
-  test('returns 403 when CAMOFOX_API_KEY is not set', async () => {
+  test('allows cookie import when CAMOFOX_API_KEY is not set', async () => {
     const cookies = [
       { name: 'a', value: '1', domain: '.example.com', path: '/' },
     ];
     const res = await postCookies('user1', cookies);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.error).toContain('disabled');
+    expect(data.ok).toBe(true);
+    expect(data.count).toBe(1);
   });
 });

@@ -53,13 +53,7 @@ router.post(
 	express.json({ limit: '512kb' }),
 	async (req: Request<{ userId: string }, unknown, { cookies?: unknown; tabId?: unknown }>, res: Response) => {
 		try {
-			if (!CONFIG.apiKey) {
-				return res.status(403).json({
-					error: 'Cookie import is disabled. Set CAMOFOX_API_KEY to enable this endpoint.',
-				});
-			}
-
-			if (!isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
 				return res.status(403).json({ error: 'Forbidden' });
 			}
 
@@ -136,13 +130,7 @@ router.get(
 	'/tabs/:tabId/cookies',
 	async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown }>, res: Response) => {
 		try {
-			if (!CONFIG.apiKey) {
-				return res.status(403).json({
-					error: 'Cookie export is disabled. Set CAMOFOX_API_KEY to enable this endpoint.',
-				});
-			}
-
-			if (!isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
 				return res.status(403).json({ error: 'Forbidden' });
 			}
 
@@ -503,20 +491,14 @@ router.post(
 	},
 );
 
-// Evaluate JS (requires API key)
+// Evaluate JS (API key optional)
 router.post(
 	'/tabs/:tabId/evaluate',
 	express.json({ limit: '64kb' }),
 	async (req: Request<{ tabId: string }, unknown, { userId?: unknown; expression?: unknown; timeout?: number }>, res: Response) => {
 		const tabId = req.params.tabId;
 		try {
-			if (!CONFIG.apiKey) {
-				return res.status(403).json({
-					error: 'JavaScript evaluation is disabled. Set CAMOFOX_API_KEY to enable this endpoint.',
-				});
-			}
-
-			if (!isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
 				return res.status(403).json({ error: 'Forbidden' });
 			}
 
