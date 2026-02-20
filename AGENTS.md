@@ -170,7 +170,7 @@ Extract resources from the current page DOM (optionally scoped to a container).
 
 ```bash
 POST /tabs/:tabId/extract-resources
-{"userId": "agent1", "selector": "div.post", "types": ["image", "link"], "extensions": [".jpg", ".png"], "resolveBlobs": true, "scrollForMore": true}
+{"userId": "agent1", "selector": "div.post", "types": ["images", "links"], "extensions": [".jpg", ".png"], "resolveBlobs": true, "triggerLazyLoad": true}
 ```
 
 ### Batch Download
@@ -178,7 +178,7 @@ Extract resources and download them in one request.
 
 ```bash
 POST /tabs/:tabId/batch-download
-{"userId": "agent1", "selector": "div.post", "types": ["image"], "maxFiles": 50}
+{"userId": "agent1", "selector": "div.post", "types": ["images"], "maxFiles": 50}
 ```
 
 ### Resolve Blob URLs

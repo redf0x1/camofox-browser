@@ -3,6 +3,16 @@ import type { Page } from 'playwright-core';
 import type { ExtractResourcesParams, ExtractResourcesResult } from '../types';
 import { normalizeExtensions } from '../utils/download-helpers';
 
+const TYPE_ALIASES: Record<string, string> = {
+	image: 'images',
+	images: 'images',
+	link: 'links',
+	links: 'links',
+	media: 'media',
+	document: 'documents',
+	documents: 'documents',
+};
+
 export async function resolveBlob(page: Page, blobUrl: string): Promise<{ base64: string; mimeType: string } | null> {
 	try {
 		const result = await page.evaluate(async (url) => {
@@ -30,7 +40,9 @@ export async function resolveBlob(page: Page, blobUrl: string): Promise<{ base64
 export async function extractResources(page: Page, params: ExtractResourcesParams): Promise<ExtractResourcesResult> {
 	const start = Date.now();
 	const selector = params.selector || 'body';
-	const requestedTypes = (params.types || ['images', 'links', 'media', 'documents']).map((t) => String(t));
+	const requestedTypes = (params.types || ['images', 'links', 'media', 'documents']).map(
+		(t) => TYPE_ALIASES[String(t).toLowerCase()] || String(t),
+	);
 	const extFilters = normalizeExtensions(params.extensions);
 
 	let lazyLoadsTriggered = 0;
