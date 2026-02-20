@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.5.0] - 2025-02-20
+
+### Added
+- Download lifecycle management (register, list, get, delete, cleanup with TTL)
+- Scoped DOM resource extraction (images, links, media, documents from specific containers)
+- Batch download pipeline with concurrency control and semaphore
+- Blob URL resolution for Firefox (FileReader.readAsDataURL pattern)
+- Enhanced `GET /links` with scope, extension, and downloadOnly filters
+- 8 new REST endpoints for downloads and resource management
+- Per-user download cap (500 entries) with LRU eviction
+- Stream error handling on download content delivery
+- Data URI support (both base64 and URL-encoded)
+- Comprehensive unit tests for download helpers, registry, and batch downloader
+
+### Fixed
+- Resolve-blobs endpoint now capped at 25 URLs with parallel resolution
+- Batch-download timeout increased to 5 minutes
+- Cleanup interval skips pending downloads
+- Error responses standardized with safeError() across all new endpoints
+
 ## [1.4.0] - 2026-02-18
 
 ### Added
