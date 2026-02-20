@@ -9,7 +9,17 @@ import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
 import { loadConfig } from './utils/config';
 import { closeBrowser } from './services/browser';
 import { contextPool } from './services/context-pool';
-import { closeAllSessions, countTotalTabsForSessions, getAllSessions, startCleanupInterval } from './services/session';
+import {
+	closeAllSessions,
+	countTotalTabsForSessions,
+	getAllSessions,
+	startCleanupInterval as startSessionCleanupInterval,
+	stopCleanupInterval as stopSessionCleanupInterval,
+} from './services/session';
+import {
+	startCleanupInterval as startDownloadCleanupInterval,
+	stopCleanupInterval as stopDownloadCleanupInterval,
+} from './services/download';
 
 const CONFIG = loadConfig();
 
@@ -29,7 +39,8 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 
 installCrashHandlers();
 
-startCleanupInterval();
+startSessionCleanupInterval();
+startDownloadCleanupInterval(CONFIG.downloadTtlMs);
 
 startStatsBeacon(() => {
 	const sessions = getAllSessions().size;
@@ -60,6 +71,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
 	}
 
 	await closeAllSessions().catch(() => {});
+	stopSessionCleanupInterval();
+	stopDownloadCleanupInterval();
 	await closeBrowser().catch(() => {});
 	process.exit(0);
 }

@@ -100,6 +100,103 @@ export interface EvaluateResult {
   errorType?: 'js_error' | 'timeout' | 'validation';
 }
 
+export interface DownloadInfo {
+  id: string;
+  tabId: string;
+  userId: string;
+  suggestedFilename: string;
+  savedFilename: string;
+  mimeType: string;
+  size: number;
+  status: 'pending' | 'completed' | 'failed' | 'canceled';
+  error?: string;
+  url: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+export interface DownloadListFilters {
+  tabId?: string;
+  userId: string;
+  status?: string;
+  extension?: string;
+  mimeType?: string;
+  minSize?: number;
+  maxSize?: number;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ExtractedResource {
+  url: string;
+  filename: string | null;
+  mimeType: string | null;
+  tagName: string;
+  type: 'image' | 'link' | 'media' | 'document';
+  alt: string | null;
+  width: number | null;
+  height: number | null;
+  isBlob: boolean;
+  isDataUri: boolean;
+  hasDownloadAttr: boolean;
+  text: string | null;
+  ref: string | null;
+  parentSelector: string | null;
+}
+
+export interface ContainerInfo {
+  selector: string;
+  tagName: string;
+  childCount: number;
+}
+
+export interface ExtractionMetadata {
+  extractionTimeMs: number;
+  lazyLoadsTriggered: number;
+  blobsResolved: number;
+}
+
+export interface ExtractResourcesParams {
+  userId: string;
+  selector?: string;
+  types?: ('images' | 'links' | 'media' | 'documents')[];
+  extensions?: string[];
+  resolveBlobs?: boolean;
+  triggerLazyLoad?: boolean;
+}
+
+export interface ExtractResourcesResult {
+  ok: boolean;
+  container: ContainerInfo;
+  resources: {
+    images: ExtractedResource[];
+    links: ExtractedResource[];
+    media: ExtractedResource[];
+    documents: ExtractedResource[];
+  };
+  totals: { images: number; links: number; media: number; documents: number; total: number };
+  metadata: ExtractionMetadata;
+}
+
+export interface BatchDownloadParams {
+  userId: string;
+  selector?: string;
+  types?: ('images' | 'links' | 'media' | 'documents')[];
+  extensions?: string[];
+  resolveBlobs?: boolean;
+  concurrency?: number;
+  maxFiles?: number;
+}
+
+export interface BatchDownloadResult {
+  ok: boolean;
+  batchId: string;
+  downloads: DownloadInfo[];
+  errors: { url: string; error: string }[];
+  totals: { completed: number; failed: number; total: number };
+}
+
 declare global {
   namespace Express {
     // Attached by logging middleware for correlation + timing.

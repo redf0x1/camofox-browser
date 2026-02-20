@@ -1,31 +1,8 @@
 import type { Locator, Page } from 'playwright-core';
 
+import { expandMacro } from '../utils/macros';
 import type { EvaluateResult, RefInfo, ScrollPosition, TabState, WaitForPageReadyOptions } from '../types';
 import { log } from '../middleware/logging';
-
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-	let timer: ReturnType<typeof setTimeout>;
-	return Promise.race([
-		promise.finally(() => clearTimeout(timer)),
-		new Promise<T>((_, reject) => {
-			timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-		}),
-	]);
-}
-
-const PAGE_CLOSE_TIMEOUT_MS = 5000;
-
-export async function safePageClose(page: Page): Promise<void> {
-	try {
-		await Promise.race([
-			page.close(),
-			new Promise<void>((resolve) => setTimeout(resolve, PAGE_CLOSE_TIMEOUT_MS)),
-		]);
-	} catch (e: unknown) {
-		const msg = e instanceof Error ? e.message : String(e);
-		console.warn(`[camofox] page close failed: ${msg}`);
-	}
-}
 
 const ALLOWED_URL_SCHEMES: ReadonlyArray<'http:' | 'https:'> = ['http:', 'https:'];
 
@@ -59,6 +36,26 @@ const MAX_RESULT_SIZE = 1048576; // 1MB
 // tabId -> Promise (the currently executing operation)
 const tabLocks = new Map<string, Promise<unknown>>();
 
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label = 'operation'): Promise<T> {
+	const ms = Math.max(0, Number(timeoutMs) || 0);
+	if (ms === 0) return promise;
+
+	let timer: NodeJS.Timeout | null = null;
+	const timeoutPromise = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(() => {
+			const err = new Error(`${label} timed out after ${ms}ms`);
+			(err as Error & { code?: string }).code = 'ETIMEDOUT';
+			reject(err);
+		}, ms);
+	});
+
+	try {
+		return await Promise.race([promise, timeoutPromise]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
 export async function withTabLock<T>(tabId: string, operation: () => Promise<T>): Promise<T> {
 	const pending = tabLocks.get(tabId);
 	if (pending) {
@@ -87,6 +84,29 @@ export function clearTabLock(tabId: string): void {
 
 export function clearAllTabLocks(): void {
 	tabLocks.clear();
+}
+
+
+export async function safePageClose(
+	page:
+		| (Pick<Page, 'close'> & { isClosed?: () => boolean })
+		| { close: (...args: any[]) => Promise<unknown>; isClosed?: () => boolean }
+		| null
+		| undefined,
+): Promise<void> {
+	if (!page) return;
+	try {
+		if (typeof page.isClosed === 'function' && page.isClosed()) return;
+	} catch {
+		// ignore
+	}
+
+	try {
+		await withTimeout((page as any).close({ runBeforeUnload: true }), 5000, 'page.close');
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.warn(`[camofox] page close failed: ${message}`);
+	}
 }
 
 export function validateUrl(url: string): string | null {
@@ -253,19 +273,13 @@ export async function buildRefs(page: Page): Promise<Map<string, RefInfo>> {
 
 	await waitForPageReady(page, { waitForNetwork: false });
 
-	let ariaYaml: string | null = null;
+	let ariaYaml: string | null;
 	try {
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 5000 });
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
 	} catch {
-		// Retry once
-		try {
-			await page.waitForLoadState('load', { timeout: 3000 }).catch(() => {});
-			ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 5000 });
-		} catch (retryErr: unknown) {
-			const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-			console.warn(`[camofox] ariaSnapshot retry failed, returning empty refs: ${msg}`);
-			return refs;
-		}
+		log('warn', 'ariaSnapshot failed, retrying');
+		await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
 	}
 
 	if (!ariaYaml) {
@@ -306,13 +320,7 @@ export async function buildRefs(page: Page): Promise<Map<string, RefInfo>> {
 export async function getAriaSnapshot(page: Page): Promise<string | null> {
 	if (!page || page.isClosed()) return null;
 	await waitForPageReady(page, { waitForNetwork: false });
-	try {
-		return await page.locator('body').ariaSnapshot({ timeout: 5000 });
-	} catch (err: unknown) {
-		const msg = err instanceof Error ? err.message : String(err);
-		console.warn(`[camofox] getAriaSnapshot failed: ${msg}`);
-		return null;
-	}
+	return page.locator('body').ariaSnapshot({ timeout: 10000 });
 }
 
 export function refToLocator(page: Page, ref: string, refs: Map<string, RefInfo>): Locator | null {
@@ -332,6 +340,32 @@ export function createTabState(page: Page): TabState {
 		visitedUrls: new Set(),
 		toolCalls: 0,
 	};
+}
+
+export async function navigateTab(tabId: string, tabState: TabState, params: { url?: string; macro?: string; query?: string }): Promise<{ ok: true; url: string }>{
+	const { url, macro, query } = params;
+	let targetUrl = url;
+	if (macro) {
+		targetUrl = expandMacro(macro, query) || url;
+	}
+	if (!targetUrl) {
+		throw new Error('url or macro required');
+	}
+
+	const urlErr = validateUrl(targetUrl);
+	if (urlErr) {
+		const err = new Error(urlErr);
+		// Used by routes to map to 400.
+		(err as Error & { statusCode?: number }).statusCode = 400;
+		throw err;
+	}
+
+	return withTabLock(tabId, async () => {
+		await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+		tabState.visitedUrls.add(targetUrl);
+		tabState.refs = await buildRefs(tabState.page);
+		return { ok: true as const, url: tabState.page.url() };
+	});
 }
 
 export async function snapshotTab(tabState: TabState): Promise<{ url: string; snapshot: string; refsCount: number }>{
@@ -465,6 +499,14 @@ export async function pressTab(tabId: string, tabState: TabState, key: string): 
 	return { ok: true as const };
 }
 
+export async function scrollTab(tabState: TabState, params: { direction?: 'up' | 'down'; amount?: number }): Promise<{ ok: true }>{
+	const { direction = 'down', amount = 500 } = params;
+	const delta = direction === 'up' ? -amount : amount;
+	await tabState.page.mouse.wheel(0, delta);
+	await tabState.page.waitForTimeout(300);
+	return { ok: true as const };
+}
+
 export async function scrollElementTab(
 	tabId: string,
 	tabState: TabState,
@@ -563,8 +605,14 @@ export async function evaluateTab(
 	return withTabLock(tabId, async () => {
 		const page = tabState.page;
 		const timeout = Math.min(Math.max(params.timeout ?? DEFAULT_EVAL_TIMEOUT, 100), MAX_EVAL_TIMEOUT);
+
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		const timeoutPromise = new Promise<never>((_resolve, reject) => {
+			timeoutId = setTimeout(() => reject(new Error('EVAL_TIMEOUT')), timeout);
+		});
+
 		try {
-			const result = await withTimeout(page.evaluate(params.expression), timeout, 'evaluate');
+			const result = await Promise.race([page.evaluate(params.expression), timeoutPromise]);
 
 			const serialized = JSON.stringify(result);
 			if (serialized === undefined) {
@@ -594,7 +642,7 @@ export async function evaluateTab(
 			};
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
-			if (message === `evaluate timed out after ${timeout}ms`) {
+			if (message === 'EVAL_TIMEOUT') {
 				return {
 					ok: false,
 					error: `Evaluation timed out after ${timeout}ms`,
@@ -606,6 +654,8 @@ export async function evaluateTab(
 				error: message,
 				errorType: 'js_error',
 			};
+		} finally {
+			if (timeoutId) clearTimeout(timeoutId);
 		}
 	});
 }
@@ -636,25 +686,52 @@ export async function refreshTab(tabId: string, tabState: TabState): Promise<{ o
 
 export async function getLinks(
 	tabState: TabState,
-	params: { limit: number; offset: number },
+	params: { limit: number; offset: number; scope?: string; extension?: string; downloadOnly?: boolean },
 ): Promise<{ links: Array<{ url: string; text: string }>; pagination: { total: number; offset: number; limit: number; hasMore: boolean } }>{
-	const { limit, offset } = params;
-	const allLinks = await tabState.page.evaluate(() => {
-		type AnchorLike = { href?: string; textContent?: string | null };
-		type DocumentLike = {
-			querySelectorAll(selector: string): { forEach(cb: (a: AnchorLike) => void): void };
-		};
-		const doc = (globalThis as unknown as { document: DocumentLike }).document;
-		const links: Array<{ url: string; text: string }> = [];
-		doc.querySelectorAll('a[href]').forEach((a) => {
-			const href = typeof a.href === 'string' ? a.href : '';
-			const text = (a.textContent ?? '').trim().slice(0, 100);
-			if (href && href.startsWith('http')) {
-				links.push({ url: href, text });
-			}
-		});
-		return links;
-	});
+	const { limit, offset, scope, extension, downloadOnly } = params;
+	const extFilters = String(extension || '')
+		.split(',')
+		.map((s) => s.trim().toLowerCase())
+		.filter(Boolean)
+		.map((e) => (e.startsWith('.') ? e : `.${e}`));
+
+	const allLinks = await tabState.page.evaluate(
+		({ scopeSel, dlOnly, exts }) => {
+			type AnchorLike = { href?: string; textContent?: string | null; hasAttribute?(name: string): boolean };
+			type QueryRootLike = {
+				querySelector?(selector: string): QueryRootLike | null;
+				querySelectorAll(selector: string): { forEach(cb: (a: AnchorLike) => void): void };
+			};
+			type DocumentLike = QueryRootLike;
+			const doc = (globalThis as unknown as { document: DocumentLike }).document;
+
+			const root: QueryRootLike | null = scopeSel ? (doc.querySelector ? doc.querySelector(scopeSel) : null) : doc;
+			if (!root) return [] as Array<{ url: string; text: string }>;
+
+			const extOk = (href: string): boolean => {
+				if (!exts || exts.length === 0) return true;
+				try {
+					const u = new URL(href);
+					const p = (u.pathname || '').toLowerCase();
+					return (exts as string[]).some((e) => p.endsWith(e));
+				} catch {
+					return false;
+				}
+			};
+
+			const links: Array<{ url: string; text: string }> = [];
+			root.querySelectorAll('a[href]').forEach((a) => {
+				if (dlOnly && !(typeof a.hasAttribute === 'function' && a.hasAttribute('download'))) return;
+				const href = typeof a.href === 'string' ? a.href : '';
+				const text = (a.textContent ?? '').trim().slice(0, 100);
+				if (href && href.startsWith('http') && extOk(href)) {
+					links.push({ url: href, text });
+				}
+			});
+			return links;
+		},
+		{ scopeSel: scope || null, dlOnly: !!downloadOnly, exts: extFilters },
+	);
 
 	const total = allLinks.length;
 	const paginated = allLinks.slice(offset, offset + limit);
@@ -667,4 +744,9 @@ export async function getLinks(
 export async function screenshotTab(tabState: TabState, fullPage: boolean): Promise<Buffer> {
 	const buffer = await tabState.page.screenshot({ type: 'png', fullPage });
 	return buffer as Buffer;
+}
+
+export async function waitTab(tabState: TabState, params: { timeout: number; waitForNetwork: boolean }): Promise<{ ok: true; ready: boolean }>{
+	const ready = await waitForPageReady(tabState.page, { timeout: params.timeout, waitForNetwork: params.waitForNetwork });
+	return { ok: true as const, ready };
 }

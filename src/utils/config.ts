@@ -24,6 +24,12 @@ export interface ServerEnv {
   CAMOFOX_API_KEY?: string;
   CAMOFOX_COOKIES_DIR?: string;
   CAMOFOX_PROFILES_DIR?: string;
+  CAMOFOX_DOWNLOADS_DIR?: string;
+  CAMOFOX_DOWNLOAD_TTL_MS?: string;
+  CAMOFOX_MAX_DOWNLOAD_SIZE_MB?: string;
+  CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
+  CAMOFOX_MAX_BLOB_SIZE_MB?: string;
+  CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -37,6 +43,12 @@ export interface AppConfig {
   apiKey: string;
   cookiesDir: string;
   profilesDir: string;
+  downloadsDir: string;
+  downloadTtlMs: number;
+  maxDownloadSizeMb: number;
+  maxBatchConcurrency: number;
+  maxBlobSizeMb: number;
+  maxDownloadsPerUser: number;
   handlerTimeoutMs: number;
   maxConcurrentPerUser: number;
   proxy: ProxyConfig;
@@ -51,6 +63,12 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_API_KEY?: string;
   CAMOFOX_COOKIES_DIR?: string;
   CAMOFOX_PROFILES_DIR?: string;
+  CAMOFOX_DOWNLOADS_DIR?: string;
+  CAMOFOX_DOWNLOAD_TTL_MS?: string;
+  CAMOFOX_MAX_DOWNLOAD_SIZE_MB?: string;
+  CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
+  CAMOFOX_MAX_BLOB_SIZE_MB?: string;
+  CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
   HANDLER_TIMEOUT_MS?: string;
   MAX_CONCURRENT_PER_USER?: string;
   PROXY_HOST?: string;
@@ -92,12 +110,24 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     throw new Error('CAMOFOX_PROFILES_DIR must be a non-empty string');
   }
 
+  const downloadsDir = env.CAMOFOX_DOWNLOADS_DIR || join(os.homedir(), '.camofox', 'downloads');
+  if (typeof downloadsDir !== 'string' || !downloadsDir) {
+    throw new Error('CAMOFOX_DOWNLOADS_DIR must be a non-empty string');
+  }
+
   // Ensure required directories exist (safe/recursive).
   mkdirSync(cookiesDir, { recursive: true });
   mkdirSync(profilesDir, { recursive: true });
+  mkdirSync(downloadsDir, { recursive: true });
 
   const handlerTimeoutMs = parsePositiveIntOrDefault(env.HANDLER_TIMEOUT_MS, 30000);
   const maxConcurrentPerUser = parsePositiveIntOrDefault(env.MAX_CONCURRENT_PER_USER, 3);
+
+  const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 1_800_000);
+  const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
+  const maxBatchConcurrency = parsePositiveIntOrDefault(env.CAMOFOX_MAX_BATCH_CONCURRENCY, 5);
+  const maxBlobSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_BLOB_SIZE_MB, 5);
+  const maxDownloadsPerUser = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOADS_PER_USER, 500);
 
   return {
     port,
@@ -106,6 +136,12 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     apiKey: env.CAMOFOX_API_KEY || '',
     cookiesDir,
     profilesDir,
+    downloadsDir,
+    downloadTtlMs,
+    maxDownloadSizeMb,
+    maxBatchConcurrency,
+    maxBlobSizeMb,
+    maxDownloadsPerUser,
     handlerTimeoutMs,
     maxConcurrentPerUser,
     proxy: {
@@ -123,6 +159,12 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_API_KEY: env.CAMOFOX_API_KEY,
       CAMOFOX_COOKIES_DIR: env.CAMOFOX_COOKIES_DIR,
       CAMOFOX_PROFILES_DIR: env.CAMOFOX_PROFILES_DIR,
+      CAMOFOX_DOWNLOADS_DIR: env.CAMOFOX_DOWNLOADS_DIR,
+      CAMOFOX_DOWNLOAD_TTL_MS: env.CAMOFOX_DOWNLOAD_TTL_MS,
+      CAMOFOX_MAX_DOWNLOAD_SIZE_MB: env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB,
+      CAMOFOX_MAX_BATCH_CONCURRENCY: env.CAMOFOX_MAX_BATCH_CONCURRENCY,
+      CAMOFOX_MAX_BLOB_SIZE_MB: env.CAMOFOX_MAX_BLOB_SIZE_MB,
+      CAMOFOX_MAX_DOWNLOADS_PER_USER: env.CAMOFOX_MAX_DOWNLOADS_PER_USER,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,

@@ -5,6 +5,7 @@ import { log } from '../middleware/logging';
 import { clearTabLock, clearAllTabLocks } from './tab';
 import { loadConfig } from '../utils/config';
 import { contextPool } from './context-pool';
+import { cleanupUserDownloads } from './download';
 
 const CONFIG = loadConfig();
 
@@ -75,6 +76,12 @@ function cleanupSessionsForUserId(userId: string, reason: string): void {
 	const prefix = normalizeUserId(userId);
 	// If a session is currently being created, drop our reference so callers don't keep a stale placeholder.
 	launchingSessions.delete(prefix);
+
+	try {
+		cleanupUserDownloads(prefix);
+	} catch {
+		// ignore cleanup errors
+	}
 
 	for (const [key, session] of sessions) {
 		if (key === prefix || key.startsWith(prefix + ':')) {
@@ -285,6 +292,11 @@ export async function closeAllSessions(): Promise<void> {
 	for (const [userId, session] of sessions) {
 		unindexSessionTabs(session);
 		sessions.delete(userId);
+		try {
+			cleanupUserDownloads(userId);
+		} catch {
+			// ignore
+		}
 	}
 	launchingSessions.clear();
 }

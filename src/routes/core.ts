@@ -44,6 +44,18 @@ import {
 	withTabLock,
 } from '../services/tab';
 
+import {
+	registerDownloadListener,
+	listDownloads,
+	getDownload,
+	getDownloadPath,
+	deleteDownload,
+	getRecentDownloads,
+	cleanupUserDownloads,
+} from '../services/download';
+import { extractResources, resolveBlob } from '../services/resource-extractor';
+import { batchDownload } from '../services/batch-downloader';
+
 import type { CookieInput, ContextOverrides } from '../types';
 
 const CONFIG = loadConfig();
@@ -255,9 +267,12 @@ router.post(
 			const group = getTabGroup(session, resolvedSessionKey);
 			const page = await session.context.newPage();
 			const tabId = crypto.randomUUID();
+			(page as unknown as { __camofox_tabId?: string }).__camofox_tabId = tabId;
 			const tabState = createTabState(page);
 			group.set(tabId, tabState);
 			indexTab(tabId, sessionMapKey);
+
+			registerDownloadListener(tabId, String(userId), page);
 
 			if (url) {
 				const urlErr = validateUrl(url);
@@ -418,8 +433,18 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
 			withTimeout(clickTab(tabId, tabState, { ref, selector }), CONFIG.handlerTimeoutMs, 'click'),
 		);
+		const responseObj: Record<string, unknown> = { ...result };
+		const recentDownloads = getRecentDownloads(tabId, 2000);
+		if (recentDownloads.length > 0) {
+			responseObj.downloads = recentDownloads.map((d) => ({
+				id: d.id,
+				filename: d.suggestedFilename,
+				status: d.status,
+				size: d.size,
+			}));
+		}
 		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });
-		return res.json(result);
+		return res.json(responseObj);
 	} catch (err) {
 		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
 		const message = err instanceof Error ? err.message : String(err);
@@ -614,11 +639,19 @@ router.post('/tabs/:tabId/refresh', async (req: Request<{ tabId: string }, unkno
 });
 
 // Get links
-router.get('/tabs/:tabId/links', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown; limit?: string; offset?: string }>, res: Response) => {
+router.get(
+	'/tabs/:tabId/links',
+	async (
+		req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown; limit?: string; offset?: string; scope?: string; extension?: string; downloadOnly?: string }>,
+		res: Response,
+	) => {
 	try {
 		const userId = req.query.userId;
 		const limit = Number.parseInt(String(req.query.limit ?? ''), 10) || 50;
 		const offset = Number.parseInt(String(req.query.offset ?? ''), 10) || 0;
+		const scope = typeof req.query.scope === 'string' && req.query.scope ? req.query.scope : undefined;
+		const extension = typeof req.query.extension === 'string' && req.query.extension ? req.query.extension : undefined;
+		const downloadOnly = String(req.query.downloadOnly || '').toLowerCase() === 'true';
 		const found = findTabById(req.params.tabId, userId);
 		if (!found) {
 			log('warn', 'links: tab not found', { reqId: req.reqId, tabId: req.params.tabId, userId });
@@ -627,14 +660,15 @@ router.get('/tabs/:tabId/links', async (req: Request<{ tabId: string }, unknown,
 
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const result = await getLinks(tabState, { limit, offset });
+		const result = await getLinks(tabState, { limit, offset, scope, extension, downloadOnly });
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'links failed', { reqId: req.reqId, error: message });
 		return res.status(500).json({ error: safeError(err) });
 	}
-});
+	},
+);
 
 // Screenshot
 router.get('/tabs/:tabId/screenshot', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown; fullPage?: string }>, res: Response) => {
@@ -732,11 +766,224 @@ router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res:
 	try {
 		const userId = normalizeUserId(req.params.userId);
 		await closeSessionsForUser(userId);
+		// Ensure downloads are cleaned even if the session was already partially removed.
+		cleanupUserDownloads(userId);
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'session close failed', { error: message });
 		return res.status(500).json({ error: safeError(err) });
+	}
+});
+
+// Downloads: list by tab
+router.get('/tabs/:tabId/downloads', async (req, res) => {
+	try {
+		const { tabId } = req.params as { tabId: string };
+		const userId = req.query.userId as string;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const filters = {
+			tabId,
+			userId,
+			status: req.query.status as string,
+			extension: req.query.extension as string,
+			mimeType: req.query.mimeType as string,
+			minSize: req.query.minSize ? Number(req.query.minSize) : undefined,
+			maxSize: req.query.maxSize ? Number(req.query.maxSize) : undefined,
+			sort: req.query.sort as string,
+			limit: req.query.limit ? Number(req.query.limit) : 50,
+			offset: req.query.offset ? Number(req.query.offset) : 0,
+		};
+		const result = listDownloads(filters);
+		res.json({ ok: true, ...result });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'downloads list by tab failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Downloads: list by user
+router.get('/users/:userId/downloads', async (req, res) => {
+	try {
+		const userId = req.params.userId as string;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const filters = {
+			userId,
+			status: req.query.status as string,
+			extension: req.query.extension as string,
+			mimeType: req.query.mimeType as string,
+			minSize: req.query.minSize ? Number(req.query.minSize) : undefined,
+			maxSize: req.query.maxSize ? Number(req.query.maxSize) : undefined,
+			sort: req.query.sort as string,
+			limit: req.query.limit ? Number(req.query.limit) : 50,
+			offset: req.query.offset ? Number(req.query.offset) : 0,
+		};
+		const result = listDownloads(filters);
+		res.json({ ok: true, ...result });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'downloads list by user failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Downloads: get one
+router.get('/downloads/:downloadId', async (req, res) => {
+	try {
+		const userId = req.query.userId as string;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const dl = getDownload(req.params.downloadId, userId);
+		if (!dl) return res.status(404).json({ ok: false, error: 'Download not found' });
+		res.json({ ok: true, download: dl });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'download get failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Downloads: stream content
+router.get('/downloads/:downloadId/content', async (req, res) => {
+	try {
+		const userId = req.query.userId as string;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const dl = getDownload(req.params.downloadId, userId);
+		if (!dl) return res.status(404).json({ ok: false, error: 'Download not found' });
+		if (dl.status !== 'completed') return res.status(409).json({ ok: false, error: 'Download not completed' });
+		const filePath = getDownloadPath(req.params.downloadId, userId);
+		if (!filePath) return res.status(404).json({ ok: false, error: 'File not found on disk' });
+
+		// Hardened Content-Disposition
+		const safeName = dl.suggestedFilename.replace(/[\r\n\0"]/g, '');
+		res.setHeader('Content-Type', dl.mimeType || 'application/octet-stream');
+		res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+
+		const fsMod = await import('fs');
+		const stream = fsMod.createReadStream(filePath);
+		stream.on('error', (_err) => {
+			if (!res.headersSent) {
+				res.status(500).json({ ok: false, error: 'File read error' });
+			}
+			res.destroy();
+		});
+		stream.pipe(res);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'download content failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Downloads: delete
+router.delete('/downloads/:downloadId', async (req, res) => {
+	try {
+		const userId = (req.body as any)?.userId || (req.query.userId as string);
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const deleted = deleteDownload(req.params.downloadId, userId);
+		if (!deleted) return res.status(404).json({ ok: false, error: 'Download not found' });
+		res.json({ ok: true });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'download delete failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Extract resources from a scoped container
+router.post('/tabs/:tabId/extract-resources', async (req, res) => {
+	try {
+		const { tabId } = req.params as { tabId: string };
+		const { userId, selector, types, extensions, resolveBlobs, triggerLazyLoad } = req.body as any;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const found = findTabById(tabId, userId);
+		if (!found) return res.status(404).json({ ok: false, error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(tabId, async () =>
+					extractResources(tabState.page, {
+						userId,
+						selector,
+						types,
+						extensions,
+						resolveBlobs,
+						triggerLazyLoad,
+					}),
+				),
+				CONFIG.handlerTimeoutMs,
+				'extract-resources',
+			),
+		);
+		res.json(result);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'extract resources failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Batch download from a scoped container
+router.post('/tabs/:tabId/batch-download', async (req, res) => {
+	try {
+		const { tabId } = req.params as { tabId: string };
+		const body = req.body as any;
+		const userId = body?.userId;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		const found = findTabById(tabId, userId);
+		if (!found) return res.status(404).json({ ok: false, error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(tabId, async () => batchDownload(tabState.page, body, CONFIG)),
+				300_000,
+				'batch-download',
+			),
+		);
+		res.json(result);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'batch download failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// Resolve a list of blob: URLs into base64 data URLs
+router.post('/tabs/:tabId/resolve-blobs', async (req, res) => {
+	try {
+		const { tabId } = req.params as { tabId: string };
+		const { userId, urls } = req.body as any;
+		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+		if (!urls || !Array.isArray(urls)) return res.status(400).json({ ok: false, error: 'urls array required' });
+		if (urls.length > 25) return res.status(400).json({ ok: false, error: 'urls array too large (max 25)' });
+		const found = findTabById(tabId, userId);
+		if (!found) return res.status(404).json({ ok: false, error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+
+		const urlList = urls.map((u: unknown) => String(u));
+		const settled = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(tabId, async () => Promise.allSettled(urlList.map((u) => resolveBlob(tabState.page, u)))),
+				CONFIG.handlerTimeoutMs,
+				'resolve-blobs',
+			),
+		);
+
+		const results: Array<{ url: string; resolved: { base64: string; mimeType: string } | null }> = urlList.map((url, i) => {
+			const entry = settled[i];
+			if (!entry || entry.status !== 'fulfilled') return { url, resolved: null };
+			return { url, resolved: entry.value || null };
+		});
+		res.json({ ok: true, results });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'resolve blobs failed', { error: message });
+		res.status(500).json({ ok: false, error: safeError(err) });
 	}
 });
 

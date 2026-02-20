@@ -112,6 +112,8 @@ export class ContextPool {
 		const persistentOptions: PersistentContextOptions = {
 			...(opts as unknown as PersistentContextOptions),
 			...(contextOptions as unknown as BrowserContextOptions),
+			acceptDownloads: true,
+			downloadsPath: CONFIG.downloadsDir,
 		};
 
 		const context = await firefox.launchPersistentContext(profileDir, persistentOptions);
