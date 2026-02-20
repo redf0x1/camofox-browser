@@ -245,7 +245,7 @@ npm run test:debug    # With server output
 
 ```bash
 docker build -t camofox-browser .
-docker run -p 9377:9377 camofox-browser
+docker run -d -p 9377:9377 -v ~/.camofox:/home/node/.camofox camofox-browser
 ```
 
 ## Key Files

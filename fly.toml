@@ -6,6 +6,9 @@ primary_region = "sjc"
 [env]
   PORT = "9377"
   CAMOFOX_PORT = "9377"
+  CAMOFOX_PROFILES_DIR = "/data/profiles"
+  CAMOFOX_COOKIES_DIR = "/data/cookies"
+  CAMOFOX_DOWNLOADS_DIR = "/data/downloads"
 
 [http_service]
   internal_port = 9377

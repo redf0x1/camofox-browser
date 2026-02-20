@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.1] - 2026-02-20
+
+### Fixed
+- Dockerfile: Added `VOLUME /home/node/.camofox` to make persistence intent explicit
+- fly.toml: Added `CAMOFOX_PROFILES_DIR`, `CAMOFOX_COOKIES_DIR`, `CAMOFOX_DOWNLOADS_DIR` env vars for Fly.io volume persistence
+
+### Added
+- docker-compose.yml for easy deployment with volume mount
+
+### Docs
+- Updated Docker examples in README.md and AGENTS.md with volume mount
+
 ## [1.5.0] - 2025-02-20
 
 ### Added

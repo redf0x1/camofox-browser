@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  camofox-browser:
+    build: .
+    image: camofox-browser
+    ports:
+      - "9377:9377"
+    volumes:
+      - ~/.camofox:/home/node/.camofox
+    restart: unless-stopped

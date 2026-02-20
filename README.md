@@ -83,16 +83,21 @@ npx camofox-browser
 
 ```bash
 docker build -t camofox-browser .
-docker run -p 9377:9377 camofox-browser
+docker run -d \
+  --name camofox-browser \
+  -p 9377:9377 \
+  -v ~/.camofox:/home/node/.camofox \
+  camofox-browser
 ```
 
 To persist browser profiles (cookies, localStorage, IndexedDB, etc.) across container restarts:
 
 ```bash
 docker run -d \
+  --name camofox-browser \
   -p 9377:9377 \
   -v ~/.camofox:/home/node/.camofox \
-  ghcr.io/redf0x1/camofox-browser:latest
+  camofox-browser
 ```
 
 The volume mount `-v ~/.camofox:/home/node/.camofox` ensures profiles persist across container restarts.
