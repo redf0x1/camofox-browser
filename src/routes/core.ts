@@ -441,6 +441,7 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 				filename: d.suggestedFilename,
 				status: d.status,
 				size: d.size,
+				contentUrl: d.contentUrl,
 			}));
 		}
 		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });

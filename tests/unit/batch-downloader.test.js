@@ -7,6 +7,7 @@ jest.mock('../../dist/src/services/resource-extractor', () => ({
 
 jest.mock('../../dist/src/services/download', () => ({
   upsertDownload: jest.fn(),
+  buildContentUrl: (id, userId) => `/downloads/${String(id)}/content?userId=${encodeURIComponent(String(userId))}`,
 }));
 
 jest.mock('node:fs', () => ({

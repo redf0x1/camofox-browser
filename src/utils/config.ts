@@ -123,7 +123,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const handlerTimeoutMs = parsePositiveIntOrDefault(env.HANDLER_TIMEOUT_MS, 30000);
   const maxConcurrentPerUser = parsePositiveIntOrDefault(env.MAX_CONCURRENT_PER_USER, 3);
 
-  const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 1_800_000);
+  const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
   const maxBatchConcurrency = parsePositiveIntOrDefault(env.CAMOFOX_MAX_BATCH_CONCURRENCY, 5);
   const maxBlobSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_BLOB_SIZE_MB, 5);

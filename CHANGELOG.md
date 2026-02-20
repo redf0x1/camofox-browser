@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.2] — 2026-02-20
+### Improved
+- Download metadata now includes `contentUrl` for direct file retrieval by AI agents
+- Default download TTL increased from 30 minutes to 24 hours
+- Download registry persisted to disk (`registry.json`) — survives server restarts
+- TTL countdown starts from `completedAt` instead of `createdAt`
+- Orphaned download files automatically rebuilt into registry on startup
+- AGENTS.md: Added clear download workflow guide for AI agents
+### Fixed
+- `finalizeDownload` failure branch now persists registry state
+- Click handler download response now includes `contentUrl`
+- `buildContentUrl` exported and reused (DRY)
+
 ## [1.5.1] - 2026-02-20
 
 ### Fixed

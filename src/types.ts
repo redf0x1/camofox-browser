@@ -102,6 +102,7 @@ export interface EvaluateResult {
 
 export interface DownloadInfo {
   id: string;
+  contentUrl: string;
   tabId: string;
   userId: string;
   suggestedFilename: string;

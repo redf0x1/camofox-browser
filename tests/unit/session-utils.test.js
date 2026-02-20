@@ -34,6 +34,12 @@ jest.mock('../../dist/src/services/tab', () => ({
   clearAllTabLocks: () => {},
 }));
 
+// session.ts imports cleanupUserDownloads from download.ts; mock it here to avoid
+// triggering download registry initialization (which depends on full config + fs).
+jest.mock('../../dist/src/services/download', () => ({
+  cleanupUserDownloads: () => 0,
+}));
+
 describe('session.ts utilities (unit)', () => {
   /** @type {(userId: string, max: number, op: () => Promise<any>) => Promise<any>} */
   let withUserLimit;

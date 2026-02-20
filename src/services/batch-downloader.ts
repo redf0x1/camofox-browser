@@ -9,7 +9,7 @@ import type { BatchDownloadParams, BatchDownloadResult, DownloadInfo, ExtractedR
 import { log } from '../middleware/logging';
 import { guessMimeType, safeUserDir, sanitizeFilename } from '../utils/download-helpers';
 import { extractResources, resolveBlob } from './resource-extractor';
-import { upsertDownload } from './download';
+import { buildContentUrl, upsertDownload } from './download';
 
 function createSemaphore(max: number): { acquire: () => Promise<() => void> } {
 	let active = 0;
@@ -115,6 +115,7 @@ export async function batchDownload(page: Page, params: BatchDownloadParams, con
 
 					info = {
 						id,
+						contentUrl: buildContentUrl(id, String(params.userId)),
 						tabId,
 						userId: String(params.userId),
 						suggestedFilename: suggested,

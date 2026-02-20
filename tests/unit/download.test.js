@@ -16,6 +16,9 @@ jest.mock('node:fs', () => ({
   mkdirSync: jest.fn(),
   existsSync: jest.fn().mockReturnValue(true),
   statSync: jest.fn().mockReturnValue({ size: 1024 }),
+  readFileSync: jest.fn().mockReturnValue('{}'),
+  writeFileSync: jest.fn(),
+  renameSync: jest.fn(),
   unlinkSync: jest.fn(),
   readdirSync: jest.fn().mockReturnValue([]),
   rmSync: jest.fn(),
@@ -58,7 +61,11 @@ describe('download.ts (unit)', () => {
       createdAt: 1000,
       completedAt: 1100,
     };
-    return { ...base, ...overrides };
+
+
+    const info = { ...base, ...overrides };
+    info.contentUrl = `/downloads/${info.id}/content?userId=${encodeURIComponent(info.userId)}`;
+    return info;
   }
 
   beforeEach(() => {
@@ -207,14 +214,14 @@ describe('download.ts (unit)', () => {
     jest.spyOn(Date, 'now').mockReturnValue(now);
 
     // Expired, should be removed
-    upsertDownload(makeInfo({ id: 'e1', userId: 'userA', createdAt: now - 10_000, status: 'completed', savedFilename: 'e1_a.txt' }));
-    upsertDownload(makeInfo({ id: 'e2', userId: 'userA', createdAt: now - 10_000, status: 'failed', savedFilename: 'e2_a.txt' }));
+    upsertDownload(makeInfo({ id: 'e1', userId: 'userA', createdAt: now - 10_000, completedAt: now - 10_000, status: 'completed', savedFilename: 'e1_a.txt' }));
+    upsertDownload(makeInfo({ id: 'e2', userId: 'userA', createdAt: now - 10_000, completedAt: now - 10_000, status: 'failed', savedFilename: 'e2_a.txt' }));
 
     // Expired but pending, should stay
     upsertDownload(makeInfo({ id: 'p1', userId: 'userA', createdAt: now - 10_000, status: 'pending', savedFilename: 'p1_a.txt' }));
 
     // Not expired, should stay
-    upsertDownload(makeInfo({ id: 'n1', userId: 'userA', createdAt: now - 10, status: 'completed', savedFilename: 'n1_a.txt' }));
+    upsertDownload(makeInfo({ id: 'n1', userId: 'userA', createdAt: now - 10, completedAt: now - 10, status: 'completed', savedFilename: 'n1_a.txt' }));
 
     const removed = cleanupExpiredDownloads(1000);
     expect(removed).toBe(2);

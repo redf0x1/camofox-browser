@@ -159,6 +159,32 @@ Example:
 curl -L "http://localhost:9377/downloads/<downloadId>/content?userId=agent1" -o downloaded.file
 ```
 
+### Download Workflow for AI Agents
+
+Every download response includes `contentUrl` — use it to fetch the file:
+
+1. **Trigger download** (click download button, batch-download, etc.)
+2. **List downloads** → each entry has `contentUrl`
+3. **Fetch content** → `GET {contentUrl}` returns the binary file
+
+Example flow:
+
+```bash
+# Step 1: Download triggered (e.g., via batch-download)
+POST /tabs/:tabId/batch-download
+{"userId": "agent1", "types": ["images"], "maxFiles": 10}
+
+# Step 2: Each download in response has contentUrl
+# Response: {..., "contentUrl": "/downloads/abc123/content?userId=agent1"}
+
+# Step 3: Get the actual file
+GET /downloads/abc123/content?userId=agent1
+# Returns: binary file with proper Content-Type header
+```
+
+Files are stored at `~/.camofox/downloads/{userId}/` (configurable via `CAMOFOX_DOWNLOADS_DIR`).
+Downloads persist for 24 hours by default (configurable via `CAMOFOX_DOWNLOAD_TTL_MS`).
+
 ### Delete Download
 ```bash
 DELETE /downloads/:downloadId
