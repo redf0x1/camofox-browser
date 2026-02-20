@@ -119,6 +119,76 @@ POST /tabs/:tabId/refresh  {"userId": "agent1"}
 GET /tabs/:tabId/links?userId=agent1&limit=50
 ```
 
+Additional query params:
+- `scope` — CSS selector to scope link extraction
+- `extension` — Comma-separated extensions to filter (e.g., ".pdf,.doc")
+- `downloadOnly` — Boolean, only return download-like links
+
+Example:
+```bash
+GET /tabs/:tabId/links?userId=agent1&limit=50&scope=main&extension=.pdf,.doc&downloadOnly=true
+```
+
+### List Downloads for Tab
+```bash
+GET /tabs/:tabId/downloads?userId=agent1
+```
+
+### List Downloads for User
+```bash
+GET /users/:userId/downloads
+```
+
+Example:
+```bash
+GET /users/agent1/downloads
+```
+
+### Get Download Metadata
+```bash
+GET /downloads/:downloadId?userId=agent1
+```
+
+### Get Download Content (binary stream)
+```bash
+GET /downloads/:downloadId/content?userId=agent1
+```
+
+Example:
+```bash
+curl -L "http://localhost:9377/downloads/<downloadId>/content?userId=agent1" -o downloaded.file
+```
+
+### Delete Download
+```bash
+DELETE /downloads/:downloadId
+{"userId": "agent1"}
+```
+
+### Extract Resources
+Extract resources from the current page DOM (optionally scoped to a container).
+
+```bash
+POST /tabs/:tabId/extract-resources
+{"userId": "agent1", "selector": "div.post", "types": ["image", "link"], "extensions": [".jpg", ".png"], "resolveBlobs": true, "scrollForMore": true}
+```
+
+### Batch Download
+Extract resources and download them in one request.
+
+```bash
+POST /tabs/:tabId/batch-download
+{"userId": "agent1", "selector": "div.post", "types": ["image"], "maxFiles": 50}
+```
+
+### Resolve Blob URLs
+Resolve `blob:` URLs into `data:` URIs.
+
+```bash
+POST /tabs/:tabId/resolve-blobs
+{"userId": "agent1", "urls": ["blob:https://example.com/abc123"]}
+```
+
 ### Close Tab
 ```bash
 DELETE /tabs/:tabId?userId=agent1
