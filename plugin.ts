@@ -449,6 +449,32 @@ export default function register(api: PluginApi) {
     },
   }));
 
+  api.registerTool((_ctx: ToolContext) => ({
+    name: "camofox_youtube_transcript",
+    description: "Extract transcript from a YouTube video. Returns timestamped text.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "YouTube video URL" },
+        languages: {
+          type: "array",
+          items: { type: "string" },
+          description: "Preferred languages (default: [\"en\"])",
+          default: ["en"],
+        },
+      },
+      required: ["url"],
+    },
+    async execute(_id, params) {
+      const { url, languages } = params as { url: string; languages?: string[] };
+      const result = await fetchApi(baseUrl, "/youtube/transcript", {
+        method: "POST",
+        body: JSON.stringify({ url, languages }),
+      });
+      return toToolResult(result);
+    },
+  }));
+
   api.registerTool((ctx: ToolContext) => ({
     name: "camofox_import_cookies",
     description:

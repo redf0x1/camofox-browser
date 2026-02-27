@@ -199,6 +199,20 @@ export interface BatchDownloadResult {
   totals: { completed: number; failed: number; total: number };
 }
 
+export interface YouTubeTranscriptResult {
+  status: 'ok' | 'error';
+  code?: number;
+  message?: string;
+  transcript?: string;
+  video_url: string;
+  video_id: string;
+  video_title?: string;
+  title?: string;
+  language?: string;
+  total_words?: number;
+  available_languages?: Array<{ code: string; name: string; kind: string }>;
+}
+
 declare global {
   namespace Express {
     // Attached by logging middleware for correlation + timing.

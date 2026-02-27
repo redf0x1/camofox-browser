@@ -56,10 +56,12 @@ import {
 import { extractResources, resolveBlob } from '../services/resource-extractor';
 import { batchDownload } from '../services/batch-downloader';
 import { getHealthState, recordNavFailure, recordNavSuccess } from '../services/health';
+import { browserTranscript, extractVideoId, hasYtDlp, ytDlpTranscript } from '../services/youtube';
 
 import type { CookieInput, ContextOverrides } from '../types';
 
 const CONFIG = loadConfig();
+const INTERNAL_TRANSCRIPT_USER_ID = '__yt_transcript__';
 
 const router = Router();
 
@@ -1006,6 +1008,74 @@ router.post('/tabs/:tabId/resolve-blobs', async (req, res) => {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'resolve blobs failed', { error: message });
 		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+// YouTube transcript extraction (yt-dlp primary, browser fallback)
+router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?: unknown; languages?: unknown }>, res: Response) => {
+	const reqId = req.reqId || crypto.randomUUID().slice(0, 8);
+	const { url, languages } = req.body;
+
+	if (!url || typeof url !== 'string') {
+		return res.status(400).json({ ok: false, error: 'url is required' });
+	}
+
+	const videoId = extractVideoId(url);
+	if (!videoId) {
+		return res.status(400).json({ ok: false, error: 'Invalid YouTube URL' });
+	}
+
+	const preferredLanguages = Array.isArray(languages)
+		? languages.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+		: [];
+	const lang = preferredLanguages[0] || 'en';
+
+	try {
+		let result;
+		if (hasYtDlp()) {
+			try {
+				result = await ytDlpTranscript(reqId, url, videoId, lang, CONFIG.ytDlpTimeoutMs);
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				log('warn', 'yt-dlp transcript failed, using browser fallback', {
+					reqId,
+					videoId,
+					url,
+					error: message,
+				});
+				result = await withUserLimit(INTERNAL_TRANSCRIPT_USER_ID, CONFIG.maxConcurrentPerUser, () =>
+					browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs),
+				);
+			}
+		} else {
+			result = await withUserLimit(INTERNAL_TRANSCRIPT_USER_ID, CONFIG.maxConcurrentPerUser, () =>
+				browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs),
+			);
+		}
+
+		log('info', 'youtube transcript extracted', {
+			reqId,
+			videoId,
+			url,
+			language: result.language,
+			words: result.total_words,
+		});
+		return res.json(result);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'youtube transcript failed', {
+			reqId,
+			videoId,
+			url,
+			error: message,
+		});
+		return res.status(500).json({
+			status: 'error',
+			code: 500,
+			message: safeError(err),
+			video_url: url,
+			video_id: videoId,
+		});
 	}
 });
 

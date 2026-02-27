@@ -21,6 +21,7 @@ import {
 	stopCleanupInterval as stopDownloadCleanupInterval,
 } from './services/download';
 import { getHealthState, resetHealth, setRecovering } from './services/health';
+import { detectYtDlp } from './services/youtube';
 
 const CONFIG = loadConfig();
 
@@ -53,6 +54,10 @@ startStatsBeacon(() => {
 const PORT = CONFIG.port;
 let server: Server;
 let healthProbeInterval: NodeJS.Timeout | null = null;
+
+void detectYtDlp((message: unknown) => {
+	log('info', 'yt-dlp detection', { message: String(message) });
+});
 
 let shuttingDown = false;
 async function gracefulShutdown(signal: string): Promise<void> {

@@ -36,6 +36,8 @@ export interface ServerEnv {
   CAMOFOX_TAB_LOCK_TIMEOUT_MS?: string;
   CAMOFOX_HEALTH_PROBE_INTERVAL_MS?: string;
   CAMOFOX_FAILURE_THRESHOLD?: string;
+  CAMOFOX_YT_DLP_TIMEOUT_MS?: string;
+  CAMOFOX_YT_BROWSER_TIMEOUT_MS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -63,6 +65,8 @@ export interface AppConfig {
   tabLockTimeoutMs: number;
   healthProbeIntervalMs: number;
   failureThreshold: number;
+  ytDlpTimeoutMs: number;
+  ytBrowserTimeoutMs: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
 }
@@ -89,6 +93,8 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_TAB_LOCK_TIMEOUT_MS?: string;
   CAMOFOX_HEALTH_PROBE_INTERVAL_MS?: string;
   CAMOFOX_FAILURE_THRESHOLD?: string;
+  CAMOFOX_YT_DLP_TIMEOUT_MS?: string;
+  CAMOFOX_YT_BROWSER_TIMEOUT_MS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -146,6 +152,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const tabLockTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_TAB_LOCK_TIMEOUT_MS, 30000);
   const healthProbeIntervalMs = parsePositiveIntOrDefault(env.CAMOFOX_HEALTH_PROBE_INTERVAL_MS, 60000);
   const failureThreshold = parsePositiveIntOrDefault(env.CAMOFOX_FAILURE_THRESHOLD, 3);
+  const ytDlpTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_YT_DLP_TIMEOUT_MS, 30000);
+  const ytBrowserTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_YT_BROWSER_TIMEOUT_MS, 25000);
 
   const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
@@ -174,6 +182,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     tabLockTimeoutMs,
     healthProbeIntervalMs,
     failureThreshold,
+    ytDlpTimeoutMs,
+    ytBrowserTimeoutMs,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',
@@ -201,6 +211,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_TAB_LOCK_TIMEOUT_MS: env.CAMOFOX_TAB_LOCK_TIMEOUT_MS,
       CAMOFOX_HEALTH_PROBE_INTERVAL_MS: env.CAMOFOX_HEALTH_PROBE_INTERVAL_MS,
       CAMOFOX_FAILURE_THRESHOLD: env.CAMOFOX_FAILURE_THRESHOLD,
+      CAMOFOX_YT_DLP_TIMEOUT_MS: env.CAMOFOX_YT_DLP_TIMEOUT_MS,
+      CAMOFOX_YT_BROWSER_TIMEOUT_MS: env.CAMOFOX_YT_BROWSER_TIMEOUT_MS,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,
