@@ -355,6 +355,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 					await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 					tabState.visitedUrls.add(targetUrl);
 					tabState.refs = await buildRefs(tabState.page);
+					tabState.lastSnapshot = null;
 					return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
 				}),
 				CONFIG.handlerTimeoutMs,
@@ -375,9 +376,10 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 });
 
 // Snapshot
-router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown }>, res: Response) => {
+router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown; offset?: unknown }>, res: Response) => {
 	try {
 		const userId = req.query.userId;
+		const offset = parseInt(req.query.offset as string) || 0;
 		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const tabId = req.params.tabId;
 		const found = findTabById(tabId, userId);
@@ -386,7 +388,7 @@ router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unkno
 		const { tabState } = found;
 		tabState.toolCalls++;
 		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
-			withTimeout(snapshotTab(tabState), CONFIG.handlerTimeoutMs, 'snapshot'),
+			withTimeout(snapshotTab(tabState, offset), CONFIG.handlerTimeoutMs, 'snapshot'),
 		);
 		log('info', 'snapshot', {
 			reqId: req.reqId,

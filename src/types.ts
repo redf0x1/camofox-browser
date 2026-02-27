@@ -43,6 +43,7 @@ export interface TabState {
   refs: Map<string, RefInfo>;
   visitedUrls: Set<string>;
   toolCalls: number;
+  lastSnapshot?: string | null;
 }
 
 export interface SessionData {

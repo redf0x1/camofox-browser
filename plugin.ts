@@ -227,19 +227,43 @@ export default function register(api: PluginApi) {
   api.registerTool((ctx: ToolContext) => ({
     name: "camofox_snapshot",
     description:
-      "Get accessibility snapshot of a Camoufox page with element refs (e1, e2, etc.) for interaction. Use with camofox_create_tab.",
+      "Get accessibility snapshot of a Camoufox page with element refs (e1, e2, etc.) for interaction. Large snapshots are truncated/windowed; use offset + nextOffset to paginate.",
     parameters: {
       type: "object",
       properties: {
         tabId: { type: "string", description: "Tab identifier" },
+        offset: { type: "number", description: "Character offset for paginated snapshots. Use nextOffset from a previous truncated response." },
       },
       required: ["tabId"],
     },
     async execute(_id, params) {
-      const { tabId } = params as { tabId: string };
+      const { tabId, offset } = params as { tabId: string; offset?: number };
       const userId = ctx.agentId || fallbackUserId;
-      const result = await fetchApi(baseUrl, `/tabs/${tabId}/snapshot?userId=${userId}`);
-      return toToolResult(result);
+      const queryOffset = Number.isFinite(offset) ? Number(offset) : 0;
+      const result = (await fetchApi(baseUrl, `/tabs/${tabId}/snapshot?userId=${userId}&offset=${queryOffset}`)) as {
+        url?: string;
+        refsCount?: number;
+        snapshot?: string;
+        truncated?: boolean;
+        totalChars?: number;
+        hasMore?: boolean;
+        nextOffset?: number | null;
+      };
+
+      const text = [
+        `url: ${result.url || ""}`,
+        `refsCount: ${result.refsCount ?? 0}`,
+        `truncated: ${result.truncated ? "true" : "false"}`,
+        `totalChars: ${result.totalChars ?? 0}`,
+        `hasMore: ${result.hasMore ? "true" : "false"}`,
+        `nextOffset: ${result.nextOffset ?? "null"}`,
+        "",
+        result.snapshot || "",
+      ].join("\n");
+
+      return {
+        content: [{ type: "text", text }],
+      };
     },
   }));
 

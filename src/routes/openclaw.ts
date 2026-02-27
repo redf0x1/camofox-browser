@@ -24,12 +24,11 @@ import {
 	withUserLimit,
 } from '../services/session';
 import {
-	annotateAriaYamlWithRefs,
 	buildRefs,
 	createTabState,
-	getAriaSnapshot,
 	refToLocator,
 	safePageClose,
+	snapshotTab,
 	smartFill,
 	validateUrl,
 	withTabLock,
@@ -176,6 +175,7 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 					await tabState.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 					tabState.visitedUrls.add(url);
 					tabState.refs = await buildRefs(tabState.page);
+					tabState.lastSnapshot = null;
 					return { ok: true, targetId, url: tabState.page.url() };
 				}),
 				CONFIG.handlerTimeoutMs,
@@ -192,9 +192,10 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 });
 
 // GET /snapshot - Snapshot (OpenClaw format with query params)
-router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetId?: string; userId?: unknown; format?: string }>, res: Response) => {
+router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetId?: string; userId?: unknown; format?: string; offset?: unknown }>, res: Response) => {
 	try {
 		const { targetId, userId } = req.query;
+		const offset = parseInt(req.query.offset as string) || 0;
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
 		}
@@ -207,16 +208,7 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 		const { tabState } = found;
 		tabState.toolCalls++;
 
-		const result = await withTimeout(
-			(async () => {
-				tabState.refs = await buildRefs(tabState.page);
-				const ariaYaml = await getAriaSnapshot(tabState.page);
-				const annotatedYaml = annotateAriaYamlWithRefs(ariaYaml, tabState.refs);
-				return { url: tabState.page.url(), snapshot: annotatedYaml, refsCount: tabState.refs.size };
-			})(),
-			CONFIG.handlerTimeoutMs,
-			'openclaw-snapshot',
-		);
+		const result = await withTimeout(snapshotTab(tabState, offset), CONFIG.handlerTimeoutMs, 'openclaw-snapshot');
 
 		return res.json({
 			ok: true,
@@ -225,6 +217,10 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 			url: result.url,
 			snapshot: result.snapshot,
 			refsCount: result.refsCount,
+			truncated: result.truncated,
+			totalChars: result.totalChars,
+			hasMore: result.hasMore,
+			nextOffset: result.nextOffset,
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -334,6 +330,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 
 					await tabState.page.waitForTimeout(500);
 					tabState.refs = await buildRefs(tabState.page);
+					tabState.lastSnapshot = null;
 					return { ok: true, targetId, url: tabState.page.url() };
 				}
 

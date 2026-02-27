@@ -30,6 +30,8 @@ export interface ServerEnv {
   CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
   CAMOFOX_MAX_BLOB_SIZE_MB?: string;
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
+  CAMOFOX_MAX_SNAPSHOT_CHARS?: string;
+  CAMOFOX_SNAPSHOT_TAIL_CHARS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -51,6 +53,8 @@ export interface AppConfig {
   maxDownloadsPerUser: number;
   handlerTimeoutMs: number;
   maxConcurrentPerUser: number;
+  maxSnapshotChars: number;
+  snapshotTailChars: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
 }
@@ -69,6 +73,8 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
   CAMOFOX_MAX_BLOB_SIZE_MB?: string;
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
+  CAMOFOX_MAX_SNAPSHOT_CHARS?: string;
+  CAMOFOX_SNAPSHOT_TAIL_CHARS?: string;
   HANDLER_TIMEOUT_MS?: string;
   MAX_CONCURRENT_PER_USER?: string;
   PROXY_HOST?: string;
@@ -122,6 +128,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
 
   const handlerTimeoutMs = parsePositiveIntOrDefault(env.HANDLER_TIMEOUT_MS, 30000);
   const maxConcurrentPerUser = parsePositiveIntOrDefault(env.MAX_CONCURRENT_PER_USER, 3);
+  const maxSnapshotChars = parsePositiveIntOrDefault(env.CAMOFOX_MAX_SNAPSHOT_CHARS, 80000);
+  const snapshotTailChars = parsePositiveIntOrDefault(env.CAMOFOX_SNAPSHOT_TAIL_CHARS, 5000);
 
   const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
@@ -144,6 +152,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     maxDownloadsPerUser,
     handlerTimeoutMs,
     maxConcurrentPerUser,
+    maxSnapshotChars,
+    snapshotTailChars,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',
@@ -165,6 +175,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_MAX_BATCH_CONCURRENCY: env.CAMOFOX_MAX_BATCH_CONCURRENCY,
       CAMOFOX_MAX_BLOB_SIZE_MB: env.CAMOFOX_MAX_BLOB_SIZE_MB,
       CAMOFOX_MAX_DOWNLOADS_PER_USER: env.CAMOFOX_MAX_DOWNLOADS_PER_USER,
+      CAMOFOX_MAX_SNAPSHOT_CHARS: env.CAMOFOX_MAX_SNAPSHOT_CHARS,
+      CAMOFOX_SNAPSHOT_TAIL_CHARS: env.CAMOFOX_SNAPSHOT_TAIL_CHARS,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,

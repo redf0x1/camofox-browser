@@ -3,6 +3,8 @@ import type { Locator, Page } from 'playwright-core';
 import { expandMacro } from '../utils/macros';
 import type { EvaluateResult, RefInfo, ScrollPosition, TabState, WaitForPageReadyOptions } from '../types';
 import { log } from '../middleware/logging';
+import { loadConfig } from '../utils/config';
+import { windowSnapshot, type WindowSnapshotResult } from '../utils/snapshot';
 
 const ALLOWED_URL_SCHEMES: ReadonlyArray<'http:' | 'https:'> = ['http:', 'https:'];
 
@@ -31,6 +33,7 @@ const MAX_SNAPSHOT_NODES = 500;
 const MAX_EVAL_TIMEOUT = 30000;
 const DEFAULT_EVAL_TIMEOUT = 5000;
 const MAX_RESULT_SIZE = 1048576; // 1MB
+const CONFIG = loadConfig();
 
 // Per-tab locks to serialize operations on the same tab
 // tabId -> Promise (the currently executing operation)
@@ -339,6 +342,7 @@ export function createTabState(page: Page): TabState {
 		refs: new Map(),
 		visitedUrls: new Set(),
 		toolCalls: 0,
+		lastSnapshot: null,
 	};
 }
 
@@ -368,18 +372,61 @@ export async function navigateTab(
 		await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 		tabState.visitedUrls.add(targetUrl);
 		tabState.refs = await buildRefs(tabState.page);
+		tabState.lastSnapshot = null;
 		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
 }
 
-export async function snapshotTab(tabState: TabState): Promise<{ url: string; snapshot: string; refsCount: number }>{
+export async function snapshotTab(
+	tabState: TabState,
+	offset: number = 0,
+): Promise<{
+	url: string;
+	snapshot: string;
+	refsCount: number;
+	truncated: boolean;
+	totalChars: number;
+	hasMore?: boolean;
+	nextOffset?: number | null;
+}> {
+	const parsedOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+
+	if (parsedOffset > 0 && tabState.lastSnapshot) {
+		const cachedWindow: WindowSnapshotResult = windowSnapshot(
+			tabState.lastSnapshot,
+			parsedOffset,
+			CONFIG.maxSnapshotChars,
+			CONFIG.snapshotTailChars,
+		);
+		return {
+			url: tabState.page.url(),
+			snapshot: cachedWindow.text,
+			refsCount: tabState.refs.size,
+			truncated: cachedWindow.truncated,
+			totalChars: cachedWindow.totalChars,
+			hasMore: cachedWindow.hasMore,
+			nextOffset: cachedWindow.nextOffset,
+		};
+	}
+
 	tabState.refs = await buildRefs(tabState.page);
 	const ariaYaml = await getAriaSnapshot(tabState.page);
 	const annotatedYaml = annotateAriaYamlWithRefs(ariaYaml, tabState.refs);
+	tabState.lastSnapshot = annotatedYaml;
+	const windowed: WindowSnapshotResult = windowSnapshot(
+		annotatedYaml,
+		parsedOffset,
+		CONFIG.maxSnapshotChars,
+		CONFIG.snapshotTailChars,
+	);
 	return {
 		url: tabState.page.url(),
-		snapshot: annotatedYaml,
+		snapshot: windowed.text,
 		refsCount: tabState.refs.size,
+		truncated: windowed.truncated,
+		totalChars: windowed.totalChars,
+		hasMore: windowed.hasMore,
+		nextOffset: windowed.nextOffset,
 	};
 }
 
@@ -457,6 +504,7 @@ export async function clickTab(
 
 		await tabState.page.waitForTimeout(500);
 		tabState.refs = await buildRefs(tabState.page);
+		tabState.lastSnapshot = null;
 
 		const newUrl = tabState.page.url();
 		tabState.visitedUrls.add(newUrl);
