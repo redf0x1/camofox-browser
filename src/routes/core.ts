@@ -55,6 +55,7 @@ import {
 } from '../services/download';
 import { extractResources, resolveBlob } from '../services/resource-extractor';
 import { batchDownload } from '../services/batch-downloader';
+import { getHealthState, recordNavFailure, recordNavSuccess } from '../services/health';
 
 import type { CookieInput, ContextOverrides } from '../types';
 
@@ -176,6 +177,11 @@ router.get(
 // Health check
 router.get('/health', async (_req: Request, res: Response) => {
 	try {
+		const health = getHealthState();
+		if (health.isRecovering) {
+			return res.status(503).json({ ok: false, engine: 'camoufox', recovering: true });
+		}
+
 		const activeUserIds = contextPool.listActiveUserIds();
 		let profileDirsTotal = 0;
 		try {
@@ -192,6 +198,8 @@ router.get('/health', async (_req: Request, res: Response) => {
 			running: true,
 			engine: 'camoufox',
 			browserConnected: activeUserIds.length > 0,
+			consecutiveFailures: health.consecutiveNavFailures,
+			activeOps: health.activeOps,
 			poolSize: contextPool.size(),
 			activeUserIds,
 			profileDirsTotal,
@@ -356,6 +364,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 					tabState.visitedUrls.add(targetUrl);
 					tabState.refs = await buildRefs(tabState.page);
 					tabState.lastSnapshot = null;
+					recordNavSuccess();
 					return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
 				}),
 				CONFIG.handlerTimeoutMs,
@@ -368,7 +377,14 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 		log('info', 'navigated', { reqId: req.reqId, tabId, url: result.body.url });
 		return res.json(result.body);
 	} catch (err) {
+		const shouldWarn = recordNavFailure();
 		const message = err instanceof Error ? err.message : String(err);
+		if (shouldWarn) {
+			log('error', 'consecutive nav failures exceeded threshold', {
+				tabId,
+				failureThreshold: CONFIG.failureThreshold,
+			});
+		}
 		log('error', 'navigate failed', { reqId: req.reqId, tabId, error: message });
 		const status = err instanceof Error && err.message?.startsWith('Blocked URL scheme') ? 400 : 500;
 		return res.status(status).json({ error: safeError(err) });

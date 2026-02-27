@@ -20,6 +20,7 @@ import {
 	startCleanupInterval as startDownloadCleanupInterval,
 	stopCleanupInterval as stopDownloadCleanupInterval,
 } from './services/download';
+import { getHealthState, resetHealth, setRecovering } from './services/health';
 
 const CONFIG = loadConfig();
 
@@ -51,11 +52,13 @@ startStatsBeacon(() => {
 
 const PORT = CONFIG.port;
 let server: Server;
+let healthProbeInterval: NodeJS.Timeout | null = null;
 
 let shuttingDown = false;
 async function gracefulShutdown(signal: string): Promise<void> {
 	if (shuttingDown) return;
 	shuttingDown = true;
+	setRecovering(true);
 	log('info', 'shutting down', { signal });
 
 	const forceTimeout = setTimeout(() => {
@@ -73,6 +76,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
 	await closeAllSessions().catch(() => {});
 	stopSessionCleanupInterval();
 	stopDownloadCleanupInterval();
+	if (healthProbeInterval) {
+		clearInterval(healthProbeInterval);
+		healthProbeInterval = null;
+	}
 	await closeBrowser().catch(() => {});
 	process.exit(0);
 }
@@ -83,6 +90,20 @@ process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 server = app.listen(PORT, () => {
 	log('info', 'server started', { port: PORT, pid: process.pid, nodeVersion: process.version });
 	log('info', 'using persistent profiles', { profilesDir: CONFIG.profilesDir });
+	resetHealth();
+	healthProbeInterval = setInterval(() => {
+		const health = getHealthState();
+		if (health.isRecovering || health.activeOps > 0) return;
+
+		const timeSinceSuccess = Date.now() - health.lastSuccessfulNav;
+		if (timeSinceSuccess < 120_000) return;
+
+		log('warn', 'health probe: no successful navigation in 2+ minutes', {
+			timeSinceSuccessMs: timeSinceSuccess,
+			consecutiveFailures: health.consecutiveNavFailures,
+		});
+	}, CONFIG.healthProbeIntervalMs);
+	healthProbeInterval.unref();
 	if (!CONFIG.apiKey) {
 		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — all endpoints are open without authentication.');
 		console.warn('[camofox] Set CAMOFOX_API_KEY for production/network-exposed deployments.');

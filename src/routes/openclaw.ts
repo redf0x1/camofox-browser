@@ -34,6 +34,7 @@ import {
 	withTabLock,
 	withTimeout,
 } from '../services/tab';
+import { recordNavFailure, recordNavSuccess } from '../services/health';
 
 const CONFIG = loadConfig();
 
@@ -176,6 +177,7 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 					tabState.visitedUrls.add(url);
 					tabState.refs = await buildRefs(tabState.page);
 					tabState.lastSnapshot = null;
+					recordNavSuccess();
 					return { ok: true, targetId, url: tabState.page.url() };
 				}),
 				CONFIG.handlerTimeoutMs,
@@ -185,6 +187,7 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 
 		return res.json(result);
 	} catch (err) {
+		recordNavFailure();
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'openclaw navigate failed', { reqId: req.reqId, error: message });
 		return res.status(500).json({ error: safeError(err) });

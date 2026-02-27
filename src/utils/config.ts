@@ -32,6 +32,10 @@ export interface ServerEnv {
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
   CAMOFOX_MAX_SNAPSHOT_CHARS?: string;
   CAMOFOX_SNAPSHOT_TAIL_CHARS?: string;
+  CAMOFOX_BUILDREFS_TIMEOUT_MS?: string;
+  CAMOFOX_TAB_LOCK_TIMEOUT_MS?: string;
+  CAMOFOX_HEALTH_PROBE_INTERVAL_MS?: string;
+  CAMOFOX_FAILURE_THRESHOLD?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -55,6 +59,10 @@ export interface AppConfig {
   maxConcurrentPerUser: number;
   maxSnapshotChars: number;
   snapshotTailChars: number;
+  buildRefsTimeoutMs: number;
+  tabLockTimeoutMs: number;
+  healthProbeIntervalMs: number;
+  failureThreshold: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
 }
@@ -77,6 +85,10 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_SNAPSHOT_TAIL_CHARS?: string;
   HANDLER_TIMEOUT_MS?: string;
   MAX_CONCURRENT_PER_USER?: string;
+  CAMOFOX_BUILDREFS_TIMEOUT_MS?: string;
+  CAMOFOX_TAB_LOCK_TIMEOUT_MS?: string;
+  CAMOFOX_HEALTH_PROBE_INTERVAL_MS?: string;
+  CAMOFOX_FAILURE_THRESHOLD?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -130,6 +142,10 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const maxConcurrentPerUser = parsePositiveIntOrDefault(env.MAX_CONCURRENT_PER_USER, 3);
   const maxSnapshotChars = parsePositiveIntOrDefault(env.CAMOFOX_MAX_SNAPSHOT_CHARS, 80000);
   const snapshotTailChars = parsePositiveIntOrDefault(env.CAMOFOX_SNAPSHOT_TAIL_CHARS, 5000);
+  const buildRefsTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_BUILDREFS_TIMEOUT_MS, 12000);
+  const tabLockTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_TAB_LOCK_TIMEOUT_MS, 30000);
+  const healthProbeIntervalMs = parsePositiveIntOrDefault(env.CAMOFOX_HEALTH_PROBE_INTERVAL_MS, 60000);
+  const failureThreshold = parsePositiveIntOrDefault(env.CAMOFOX_FAILURE_THRESHOLD, 3);
 
   const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
@@ -154,6 +170,10 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     maxConcurrentPerUser,
     maxSnapshotChars,
     snapshotTailChars,
+    buildRefsTimeoutMs,
+    tabLockTimeoutMs,
+    healthProbeIntervalMs,
+    failureThreshold,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',
@@ -177,6 +197,10 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_MAX_DOWNLOADS_PER_USER: env.CAMOFOX_MAX_DOWNLOADS_PER_USER,
       CAMOFOX_MAX_SNAPSHOT_CHARS: env.CAMOFOX_MAX_SNAPSHOT_CHARS,
       CAMOFOX_SNAPSHOT_TAIL_CHARS: env.CAMOFOX_SNAPSHOT_TAIL_CHARS,
+      CAMOFOX_BUILDREFS_TIMEOUT_MS: env.CAMOFOX_BUILDREFS_TIMEOUT_MS,
+      CAMOFOX_TAB_LOCK_TIMEOUT_MS: env.CAMOFOX_TAB_LOCK_TIMEOUT_MS,
+      CAMOFOX_HEALTH_PROBE_INTERVAL_MS: env.CAMOFOX_HEALTH_PROBE_INTERVAL_MS,
+      CAMOFOX_FAILURE_THRESHOLD: env.CAMOFOX_FAILURE_THRESHOLD,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,

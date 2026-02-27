@@ -6,6 +6,7 @@ import { clearTabLock, clearAllTabLocks } from './tab';
 import { loadConfig } from '../utils/config';
 import { contextPool } from './context-pool';
 import { cleanupUserDownloads } from './download';
+import { decrementActiveOps, incrementActiveOps } from './health';
 
 const CONFIG = loadConfig();
 
@@ -58,9 +59,11 @@ export async function withUserLimit<T>(
 	}
 
 	state.active++;
+	incrementActiveOps();
 	try {
 		return await operation();
 	} finally {
+		decrementActiveOps();
 		state.active--;
 		if (state.queue.length > 0) {
 			const next = state.queue.shift()!;

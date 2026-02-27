@@ -63,9 +63,17 @@ export async function withTabLock<T>(tabId: string, operation: () => Promise<T>)
 	const pending = tabLocks.get(tabId);
 	if (pending) {
 		try {
-			await pending;
-		} catch {
-			// Previous operation failed, continue anyway
+			await Promise.race([
+				pending,
+				new Promise<never>((_resolve, reject) => {
+					setTimeout(() => reject(new Error('Tab lock timeout')), CONFIG.tabLockTimeoutMs);
+				}),
+			]);
+		} catch (err) {
+			if (err instanceof Error && err.message === 'Tab lock timeout') {
+				log('warn', 'tab lock timeout, proceeding', { tabId, timeoutMs: CONFIG.tabLockTimeoutMs });
+			}
+			// Previous operation failed or timed out, continue anyway
 		}
 	}
 
@@ -268,21 +276,72 @@ export async function dismissConsentDialogs(page: Page): Promise<void> {
 
 export async function buildRefs(page: Page): Promise<Map<string, RefInfo>> {
 	const refs = new Map<string, RefInfo>();
+	const timeoutMs = CONFIG.buildRefsTimeoutMs;
+	const start = Date.now();
 
 	if (!page || page.isClosed()) {
 		log('warn', 'buildRefs: page closed or invalid');
 		return refs;
 	}
 
+	try {
+		return await Promise.race([
+			buildRefsInner(page, refs, start, timeoutMs),
+			new Promise<Map<string, RefInfo>>((_resolve, reject) => {
+				setTimeout(() => reject(new Error('buildRefs_timeout')), timeoutMs);
+			}),
+		]);
+	} catch (err) {
+		if (err instanceof Error && err.message === 'buildRefs_timeout') {
+			log('warn', 'buildRefs: total timeout exceeded', {
+				elapsedMs: Date.now() - start,
+				timeoutMs,
+				refsCount: refs.size,
+			});
+			return refs;
+		}
+		throw err;
+	}
+}
+
+async function buildRefsInner(
+	page: Page,
+	refs: Map<string, RefInfo>,
+	start: number,
+	timeoutMs: number,
+): Promise<Map<string, RefInfo>> {
 	await waitForPageReady(page, { waitForNetwork: false });
 
+	let remaining = timeoutMs - (Date.now() - start);
+	if (remaining < 2000) {
+		log('warn', 'buildRefs: insufficient time budget before ariaSnapshot', { remainingMs: remaining, timeoutMs });
+		return refs;
+	}
+
 	let ariaYaml: string | null;
+	const firstSnapshotTimeout = Math.max(1000, Math.min(remaining - 1000, 5000));
+
 	try {
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: firstSnapshotTimeout });
 	} catch {
 		log('warn', 'ariaSnapshot failed, retrying');
-		await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
+		remaining = timeoutMs - (Date.now() - start);
+		if (remaining < 2000) {
+			log('warn', 'buildRefs: insufficient time budget before ariaSnapshot retry', { remainingMs: remaining, timeoutMs });
+			return refs;
+		}
+
+		const loadStateTimeout = Math.max(1000, Math.min(remaining - 1000, 5000));
+		await page.waitForLoadState('load', { timeout: loadStateTimeout }).catch(() => {});
+
+		remaining = timeoutMs - (Date.now() - start);
+		if (remaining < 2000) {
+			log('warn', 'buildRefs: insufficient time budget after retry prep', { remainingMs: remaining, timeoutMs });
+			return refs;
+		}
+
+		const retrySnapshotTimeout = Math.max(1000, Math.min(remaining - 1000, 5000));
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: retrySnapshotTimeout });
 	}
 
 	if (!ariaYaml) {
