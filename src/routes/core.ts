@@ -56,12 +56,11 @@ import {
 import { extractResources, resolveBlob } from '../services/resource-extractor';
 import { batchDownload } from '../services/batch-downloader';
 import { getHealthState, recordNavFailure, recordNavSuccess } from '../services/health';
-import { browserTranscript, extractVideoId, hasYtDlp, ytDlpTranscript } from '../services/youtube';
+import { browserTranscript, extractVideoId, hasYtDlp, INTERNAL_TRANSCRIPT_USER_ID, ytDlpTranscript } from '../services/youtube';
 
 import type { CookieInput, ContextOverrides } from '../types';
 
 const CONFIG = loadConfig();
-const INTERNAL_TRANSCRIPT_USER_ID = '__yt_transcript__';
 
 const router = Router();
 
@@ -1012,9 +1011,12 @@ router.post('/tabs/:tabId/resolve-blobs', async (req, res) => {
 });
 
 // YouTube transcript extraction (yt-dlp primary, browser fallback)
-router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?: unknown; languages?: unknown }>, res: Response) => {
+router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?: unknown; languages?: unknown; userId?: unknown }>, res: Response) => {
 	const reqId = req.reqId || crypto.randomUUID().slice(0, 8);
 	const { url, languages } = req.body;
+	const userId = typeof req.body.userId === 'string' && req.body.userId.trim().length > 0
+		? req.body.userId
+		: INTERNAL_TRANSCRIPT_USER_ID;
 
 	if (!url || typeof url !== 'string') {
 		return res.status(400).json({ ok: false, error: 'url is required' });
@@ -1031,27 +1033,24 @@ router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?:
 	const lang = preferredLanguages[0] || 'en';
 
 	try {
-		let result;
-		if (hasYtDlp()) {
-			try {
-				result = await ytDlpTranscript(reqId, url, videoId, lang, CONFIG.ytDlpTimeoutMs);
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				log('warn', 'yt-dlp transcript failed, using browser fallback', {
-					reqId,
-					videoId,
-					url,
-					error: message,
-				});
-				result = await withUserLimit(INTERNAL_TRANSCRIPT_USER_ID, CONFIG.maxConcurrentPerUser, () =>
-					browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs),
-				);
+		const result = await withUserLimit(userId, CONFIG.maxConcurrentPerUser, async () => {
+			if (hasYtDlp()) {
+				try {
+					return await ytDlpTranscript(reqId, url, videoId, lang, CONFIG.ytDlpTimeoutMs);
+				} catch (err: any) {
+					const stderr = err?.stderr ? ` stderr: ${String(err.stderr).slice(0, 200)}` : '';
+					const message = err instanceof Error ? err.message : String(err);
+					log('warn', 'yt-dlp transcript failed, using browser fallback', {
+						reqId,
+						videoId,
+						url,
+						error: `${message}${stderr}`,
+					});
+					return await browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs);
+				}
 			}
-		} else {
-			result = await withUserLimit(INTERNAL_TRANSCRIPT_USER_ID, CONFIG.maxConcurrentPerUser, () =>
-				browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs),
-			);
-		}
+			return await browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs);
+		});
 
 		log('info', 'youtube transcript extracted', {
 			reqId,

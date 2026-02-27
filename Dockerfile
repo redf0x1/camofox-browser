@@ -16,6 +16,8 @@ RUN npm run build
 FROM node:22-slim
 WORKDIR /app
 
+ARG YT_DLP_VERSION=2025.02.19
+
 # Persistent data defaults (profiles/downloads/cookies live under /home/node/.camofox)
 ENV CAMOFOX_PROFILES_DIR=/home/node/.camofox/profiles
 
@@ -27,7 +29,7 @@ RUN mkdir -p /home/node/.camofox/profiles /home/node/.camofox/downloads \
 RUN apt-get update && apt-get install -y --no-install-recommends     libgtk-3-0     libdbus-glib-1-2     libxt6     libx11-xcb1     libasound2     libdrm2     libgbm1     libxcomposite1     libxcursor1     libxdamage1     libxfixes3     libxi6     libxrandr2     libxrender1     libxss1     libxtst6     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libpango-1.0-0     libpangocairo-1.0-0     libxkbcommon0     libxshmfence1     fonts-freefont-ttf     fonts-liberation     fonts-noto     fonts-noto-color-emoji     fontconfig     ca-certificates     curl     python3     make     g++     && rm -rf /var/lib/apt/lists/*
 
 # Install yt-dlp for YouTube transcript extraction
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+RUN curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
 	&& chmod +x /usr/local/bin/yt-dlp
 
 # Install production deps only (as non-root)

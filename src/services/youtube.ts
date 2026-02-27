@@ -15,7 +15,7 @@ const YT_DLP_CANDIDATES = ['yt-dlp', '/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp']
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR'] as const;
 const LANG_RE = /^[a-z]{2,3}(?:-[a-zA-Z0-9]{2,8})?$/;
 const ALLOWED_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com'];
-const INTERNAL_TRANSCRIPT_USER_ID = '__yt_transcript__';
+export const INTERNAL_TRANSCRIPT_USER_ID = '__yt_transcript__';
 
 let ytDlpPath: string | null = null;
 
@@ -348,12 +348,15 @@ export async function browserTranscript(
 			{ preferredLang: normalizedLang },
 		);
 
+		let timer: NodeJS.Timeout | undefined;
 		const timedTextResponse = await Promise.race<string>([
 			timedTextPromise,
 			new Promise<string>((_resolve, reject) => {
-				setTimeout(() => reject(new Error('Timedtext response timeout')), timeoutMs);
+				timer = setTimeout(() => reject(new Error('Timedtext response timeout')), timeoutMs);
 			}),
-		]);
+		]).finally(() => {
+			if (timer) clearTimeout(timer);
+		});
 
 		const transcript = parseJson3(timedTextResponse);
 		if (!transcript || !transcript.trim()) {
