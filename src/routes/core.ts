@@ -799,6 +799,42 @@ router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res:
 	}
 });
 
+// Toggle display mode (headless/headed/virtual) for a user session
+router.post(
+	'/sessions/:userId/toggle-display',
+	async (
+		req: Request<{ userId: string }, unknown, { headless?: unknown }>,
+		res: Response,
+	) => {
+		try {
+			const userId = normalizeUserId(req.params.userId);
+			const { headless } = req.body ?? {};
+
+			if (typeof headless !== 'boolean' && headless !== 'virtual') {
+				return res.status(400).json({
+					error: 'headless must be a boolean or "virtual"',
+				});
+			}
+
+			// Existing tabs become invalid after context restart.
+			await closeSessionsForUser(userId);
+			await contextPool.restartContext(userId, headless);
+
+			const modeLabel = headless === false ? 'headed mode' : headless === 'virtual' ? 'virtual display mode' : 'headless mode';
+			return res.json({
+				ok: true,
+				headless,
+				message: `Browser restarted in ${modeLabel}. Previous tabs invalidated — create new tabs.`,
+				userId,
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'toggle display failed', { error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
+
 // Downloads: list by tab
 router.get('/tabs/:tabId/downloads', async (req, res) => {
 	try {

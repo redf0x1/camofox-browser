@@ -241,6 +241,16 @@ Returns: `{"status": "ok", "transcript": "[00:00] Hello...", "video_url": "https
 DELETE /tabs/:tabId?userId=agent1
 ```
 
+### Toggle Display Mode
+```bash
+POST /sessions/:userId/toggle-display
+{"headless": false}
+```
+Switch browser between headless (`true`), headed (`false`), or virtual display (`"virtual"`) mode.
+Restarts the browser context — all tabs are invalidated but cookies/auth persist.
+
+Returns: `{"ok": true, "headless": false, "message": "...", "userId": "agent1"}`
+
 ## Search Macros
 
 Use these instead of constructing URLs:
@@ -275,6 +285,7 @@ Refs like `e1`, `e2` are stable identifiers for page elements:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_MAX_SNAPSHOT_CHARS` | 80000 | Max characters in snapshot before truncation |
 | `CAMOFOX_SNAPSHOT_TAIL_CHARS` | 5000 | Characters preserved at end of truncated snapshot |
 | `CAMOFOX_BUILDREFS_TIMEOUT_MS` | 12000 | Timeout for building element refs |

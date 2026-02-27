@@ -190,6 +190,17 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 | DELETE | `/tabs/group/:listItemId` | Close a tab group (expects JSON body: `{ "userId": "..." }`) | Body: `userId` | None |
 | DELETE | `/sessions/:userId` | Close all sessions for a user | Path: `userId` | None |
 
+### Toggle Display Mode
+```bash
+POST /sessions/:userId/toggle-display
+{"headless": false}
+```
+Switch browser between headless and headed mode. When encountering CAPTCHAs or issues requiring visual interaction, switch to headed mode to show the browser window.
+
+Returns: `{"ok": true, "headless": false, "message": "Browser restarted in headed mode. Previous tabs invalidated — create new tabs.", "userId": "agent1"}`
+
+**Note:** This restarts the browser context. All tabs are invalidated but cookies/auth state persist via the persistent profile.
+
 | Endpoint | Description | Required |
 |----------|-------------|----------|
 | `POST /youtube/transcript` | Extract transcript from YouTube video | `url`, `languages?` |
@@ -263,6 +274,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `NODE_ENV` | `development` | Node environment |
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
 | `CAMOFOX_API_KEY` | (empty) | Enables cookie import endpoint; sent via `Authorization: Bearer ...` |
+| `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_COOKIES_DIR` | `~/.camofox/cookies` | Directory used by the OpenClaw plugin cookie tool |
 | `CAMOFOX_PROFILES_DIR` | `~/.camofox/profiles` | Profile storage directory (persistent per-user Firefox profiles) |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |

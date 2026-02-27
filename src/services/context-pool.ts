@@ -62,6 +62,7 @@ function seedDiffers(a?: PoolEntry['seedOptions'], b?: PoolEntry['seedOptions'])
 
 export class ContextPool {
 	private pool: Map<string, PoolEntry> = new Map();
+	private headlessOverrides = new Map<string, boolean | 'virtual'>();
 	private onEvictCallbacks: Array<(userId: string) => void> = [];
 
 	onEvict(callback: (userId: string) => void): void {
@@ -94,6 +95,7 @@ export class ContextPool {
 	private async launchPersistentContext(userId: string, contextOptions?: BrowserContextOptions): Promise<BrowserContext> {
 		const hostOS = getHostOS();
 		const proxy = buildProxyConfig();
+		const headless = this.headlessOverrides.get(userId) ?? CONFIG.headless;
 
 		const profileDir = profileDirForUserId(userId);
 		fs.mkdirSync(profileDir, { recursive: true });
@@ -101,7 +103,7 @@ export class ContextPool {
 		log('info', 'launching persistent context', { userId, hostOS, profileDir, geoip: !!proxy });
 
 		const opts = await launchOptions({
-			headless: true,
+			headless: headless as unknown as boolean,
 			os: hostOS,
 			humanize: true,
 			enable_cache: true,
@@ -119,6 +121,29 @@ export class ContextPool {
 		const context = await firefox.launchPersistentContext(profileDir, persistentOptions);
 		log('info', 'persistent context launched', { userId, profileDir });
 		return context;
+	}
+
+	async restartContext(userId: string, headless?: boolean | 'virtual'): Promise<PoolEntry> {
+		const normalized = String(userId);
+		if (headless !== undefined) {
+			this.headlessOverrides.set(normalized, headless);
+		}
+
+		const existing = this.pool.get(normalized);
+		if (existing) {
+			try {
+				if (existing.launching) {
+					await existing.launching.catch(() => {});
+					existing.launching = undefined;
+				}
+				await existing.context?.close();
+			} catch {
+				// ignore close errors
+			}
+			this.pool.delete(normalized);
+		}
+
+		return this.ensureContext(normalized);
 	}
 
 	private async evictIfNeeded(): Promise<void> {

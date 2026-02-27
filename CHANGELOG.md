@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0] — 2026-02-27
+
+### Added
+- **Display mode toggle** — New `POST /sessions/:userId/toggle-display` endpoint to switch browser between headless and headed mode at runtime. Useful for solving CAPTCHAs or debugging visual issues
+- **`CAMOFOX_HEADLESS` environment variable** — Configure default display mode: `true` (headless, default), `false` (headed — shows browser window), or `virtual` (Xvfb virtual display)
+- **Per-user display overrides** — Each user session can have its own display mode independent of the global default
+
 ## [1.6.2] — 2026-02-27
 
 ### Fixed
