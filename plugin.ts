@@ -383,12 +383,12 @@ export default function register(api: PluginApi) {
       type: "object",
       properties: {
         tabId: { type: "string", description: "Tab ID" },
-        userId: { type: "string", description: "User ID for session isolation" },
       },
-      required: ["tabId", "userId"],
+      required: ["tabId"],
     },
     async execute(_id, params) {
-      const { tabId, userId } = params as { tabId: string; userId: string };
+      const { tabId } = params as { tabId: string };
+      const userId = ctx.agentId || fallbackUserId;
       const result = await fetchApi(baseUrl, `/tabs/${tabId}/back`, {
         method: "POST",
         body: JSON.stringify({ userId }),
@@ -404,12 +404,12 @@ export default function register(api: PluginApi) {
       type: "object",
       properties: {
         tabId: { type: "string", description: "Tab ID" },
-        userId: { type: "string", description: "User ID for session isolation" },
       },
-      required: ["tabId", "userId"],
+      required: ["tabId"],
     },
     async execute(_id, params) {
-      const { tabId, userId } = params as { tabId: string; userId: string };
+      const { tabId } = params as { tabId: string };
+      const userId = ctx.agentId || fallbackUserId;
       const result = await fetchApi(baseUrl, `/tabs/${tabId}/forward`, {
         method: "POST",
         body: JSON.stringify({ userId }),
@@ -425,12 +425,12 @@ export default function register(api: PluginApi) {
       type: "object",
       properties: {
         tabId: { type: "string", description: "Tab ID" },
-        userId: { type: "string", description: "User ID for session isolation" },
       },
-      required: ["tabId", "userId"],
+      required: ["tabId"],
     },
     async execute(_id, params) {
-      const { tabId, userId } = params as { tabId: string; userId: string };
+      const { tabId } = params as { tabId: string };
+      const userId = ctx.agentId || fallbackUserId;
       const result = await fetchApi(baseUrl, `/tabs/${tabId}/refresh`, {
         method: "POST",
         body: JSON.stringify({ userId }),

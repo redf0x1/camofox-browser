@@ -234,7 +234,7 @@ POST /tabs/:tabId/resolve-blobs
 POST /youtube/transcript
 {"url": "https://youtube.com/watch?v=dQw4w9WgXcQ", "languages": ["en"]}
 ```
-Returns: `{"status": "ok", "transcript": "[00:00] Hello...", "video_id": "...", "video_title": "...", "language": "en", "total_words": 123}`
+Returns: `{"status": "ok", "transcript": "[00:00] Hello...", "video_url": "https://...", "video_id": "...", "video_title": "...", "language": "en", "total_words": 123}`
 
 ### Close Tab
 ```bash
