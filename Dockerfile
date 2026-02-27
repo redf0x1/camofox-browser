@@ -26,7 +26,7 @@ RUN mkdir -p /home/node/.camofox/profiles /home/node/.camofox/downloads \
 	&& chown -R node:node /home/node/.camofox
 
 # Install system dependencies for Camoufox/Firefox (Playwright Firefox runtime deps)
-RUN apt-get update && apt-get install -y --no-install-recommends     libgtk-3-0     libdbus-glib-1-2     libxt6     libx11-xcb1     libasound2     libdrm2     libgbm1     libxcomposite1     libxcursor1     libxdamage1     libxfixes3     libxi6     libxrandr2     libxrender1     libxss1     libxtst6     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libpango-1.0-0     libpangocairo-1.0-0     libxkbcommon0     libxshmfence1     fonts-freefont-ttf     fonts-liberation     fonts-noto     fonts-noto-color-emoji     fontconfig     ca-certificates     curl     python3     make     g++     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends     xvfb     libgtk-3-0     libdbus-glib-1-2     libxt6     libx11-xcb1     libasound2     libdrm2     libgbm1     libxcomposite1     libxcursor1     libxdamage1     libxfixes3     libxi6     libxrandr2     libxrender1     libxss1     libxtst6     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libpango-1.0-0     libpangocairo-1.0-0     libxkbcommon0     libxshmfence1     fonts-freefont-ttf     fonts-liberation     fonts-noto     fonts-noto-color-emoji     fontconfig     ca-certificates     curl     python3     make     g++     && rm -rf /var/lib/apt/lists/*
 
 # Install yt-dlp for YouTube transcript extraction
 RUN curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \

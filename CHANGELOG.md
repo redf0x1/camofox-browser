@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1] — 2025-07-15
+
+### Fixed
+- **Virtual display mode** — `headless: "virtual"` now correctly creates an Xvfb virtual display instead of passing string to browser launcher
+- **Headed mode in Docker** — `headless: false` auto-falls back to virtual display when no X display server is available
+- **Xvfb in Docker** — Added `xvfb` package to Docker image for virtual display support
+- **VirtualDisplay lifecycle** — Xvfb processes are properly cleaned up on context close
+
 ## [1.7.0] — 2026-02-27
 
 ### Added

@@ -20,6 +20,7 @@ export interface PoolEntry {
 	profileDir: string;
 	lastAccess: number;
 	launching?: Promise<BrowserContext>;
+	virtualDisplay?: any;
 	seedOptions?: Pick<BrowserContextOptions, 'locale' | 'timezoneId' | 'geolocation' | 'viewport'>;
 }
 
@@ -60,6 +61,17 @@ function seedDiffers(a?: PoolEntry['seedOptions'], b?: PoolEntry['seedOptions'])
 	return aj !== bj;
 }
 
+function hasUsableLinuxDisplay(): boolean {
+	const display = process.env.DISPLAY;
+	if (!display) return false;
+
+	const match = /^:([0-9]+)(?:\.[0-9]+)?$/.exec(display);
+	if (!match) return true;
+
+	const lockFile = `/tmp/.X${match[1]}-lock`;
+	return fs.existsSync(lockFile);
+}
+
 export class ContextPool {
 	private pool: Map<string, PoolEntry> = new Map();
 	private headlessOverrides = new Map<string, boolean | 'virtual'>();
@@ -92,7 +104,18 @@ export class ContextPool {
 		return Array.from(this.pool.keys());
 	}
 
-	private async launchPersistentContext(userId: string, contextOptions?: BrowserContextOptions): Promise<BrowserContext> {
+	private cleanupVirtualDisplay(entry: PoolEntry): void {
+		if (!entry.virtualDisplay) return;
+		try {
+			entry.virtualDisplay.kill();
+		} catch {
+			// ignore cleanup errors
+		} finally {
+			entry.virtualDisplay = undefined;
+		}
+	}
+
+	private async launchPersistentContext(userId: string, contextOptions?: BrowserContextOptions): Promise<{ context: BrowserContext; virtualDisplay?: any }> {
 		const hostOS = getHostOS();
 		const proxy = buildProxyConfig();
 		const headless = this.headlessOverrides.get(userId) ?? CONFIG.headless;
@@ -100,27 +123,63 @@ export class ContextPool {
 		const profileDir = profileDirForUserId(userId);
 		fs.mkdirSync(profileDir, { recursive: true });
 
-		log('info', 'launching persistent context', { userId, hostOS, profileDir, geoip: !!proxy });
+		let effectiveHeadless: boolean = headless === true;
+		let virtualDisplay: any = undefined;
 
-		const opts = await launchOptions({
-			headless: headless as unknown as boolean,
-			os: hostOS,
-			humanize: true,
-			enable_cache: true,
-			proxy: proxy ?? undefined,
+		if (headless === 'virtual' || (headless === false && hostOS === 'linux' && !hasUsableLinuxDisplay())) {
+			const { VirtualDisplay } = await import('camoufox-js/dist/virtdisplay.js');
+			virtualDisplay = new VirtualDisplay();
+			effectiveHeadless = false;
+			if (headless === false) {
+				log('warn', 'headed mode requested without DISPLAY; auto-falling back to virtual display', {
+					userId,
+					hostOS,
+					profileDir,
+				});
+			}
+		}
+
+		log('info', 'launching persistent context', {
+			userId,
+			hostOS,
+			profileDir,
 			geoip: !!proxy,
+			headless,
+			effectiveHeadless,
+			virtualDisplay: !!virtualDisplay,
 		});
 
-		const persistentOptions: PersistentContextOptions = {
-			...(opts as unknown as PersistentContextOptions),
-			...(contextOptions as unknown as BrowserContextOptions),
-			acceptDownloads: true,
-			downloadsPath: CONFIG.downloadsDir,
-		};
+		try {
+			const opts = await launchOptions({
+				headless: effectiveHeadless,
+				...(virtualDisplay ? { virtual_display: virtualDisplay.get() } : {}),
+				os: hostOS,
+				humanize: true,
+				enable_cache: true,
+				proxy: proxy ?? undefined,
+				geoip: !!proxy,
+			});
 
-		const context = await firefox.launchPersistentContext(profileDir, persistentOptions);
-		log('info', 'persistent context launched', { userId, profileDir });
-		return context;
+			const persistentOptions: PersistentContextOptions = {
+				...(opts as unknown as PersistentContextOptions),
+				...(contextOptions as unknown as BrowserContextOptions),
+				acceptDownloads: true,
+				downloadsPath: CONFIG.downloadsDir,
+			};
+
+			const context = await firefox.launchPersistentContext(profileDir, persistentOptions);
+			log('info', 'persistent context launched', { userId, profileDir, virtualDisplay: !!virtualDisplay });
+			return { context, virtualDisplay };
+		} catch (err) {
+			if (virtualDisplay) {
+				try {
+					virtualDisplay.kill();
+				} catch {
+					// ignore cleanup errors
+				}
+			}
+			throw err;
+		}
 	}
 
 	async restartContext(userId: string, headless?: boolean | 'virtual'): Promise<PoolEntry> {
@@ -131,16 +190,7 @@ export class ContextPool {
 
 		const existing = this.pool.get(normalized);
 		if (existing) {
-			try {
-				if (existing.launching) {
-					await existing.launching.catch(() => {});
-					existing.launching = undefined;
-				}
-				await existing.context?.close();
-			} catch {
-				// ignore close errors
-			}
-			this.pool.delete(normalized);
+			await this.closeContext(normalized);
 		}
 
 		return this.ensureContext(normalized);
@@ -206,17 +256,20 @@ export class ContextPool {
 		};
 
 		newEntry.launching = this.launchPersistentContext(normalized, options)
-			.then((ctx) => {
-				newEntry.context = ctx;
+			.then(({ context, virtualDisplay }) => {
+				newEntry.context = context;
+				newEntry.virtualDisplay = virtualDisplay;
 				newEntry.launching = undefined;
 				newEntry.lastAccess = Date.now();
-				ctx.on('close', () => {
+				context.on('close', () => {
+					this.cleanupVirtualDisplay(newEntry);
 					log('info', 'persistent context closed', { userId: normalized, profileDir });
 					this.pool.delete(normalized);
 				});
-				return ctx;
+				return context;
 			})
 			.catch((err) => {
+				this.cleanupVirtualDisplay(newEntry);
 				this.pool.delete(normalized);
 				const message = err instanceof Error ? err.message : String(err);
 				log('error', 'persistent context launch failed', { userId: normalized, profileDir, error: message });
@@ -241,6 +294,7 @@ export class ContextPool {
 			}
 			await entry.context?.close().catch(() => {});
 		} finally {
+			this.cleanupVirtualDisplay(entry);
 			this.pool.delete(normalized);
 			log('info', 'persistent context removed from pool', { userId: normalized, profileDir: entry.profileDir });
 		}
