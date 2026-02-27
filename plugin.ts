@@ -41,6 +41,14 @@ interface HealthCheckResult {
   details?: Record<string, unknown>;
 }
 
+interface ServerHealth {
+  status?: "ok" | "degraded";
+  consecutiveFailures?: number;
+  activeOps?: number;
+  tabs?: number;
+  sessions?: number;
+}
+
 interface CliContext {
   program: {
     command: (name: string) => {
@@ -170,6 +178,16 @@ async function fetchApi(
     throw new Error(`${res.status}: ${text}`);
   }
   return res.json();
+}
+
+async function fetchHealth(baseUrl: string): Promise<{ ok: boolean; httpStatus: number; data: ServerHealth }> {
+  const res = await fetch(`${baseUrl}/health`);
+  const json = (await res.json()) as ServerHealth;
+  return {
+    ok: res.ok,
+    httpStatus: res.status,
+    data: json,
+  };
 }
 
 function toToolResult(data: unknown): ToolResult {
@@ -353,6 +371,69 @@ export default function register(api: PluginApi) {
       const result = await fetchApi(baseUrl, `/tabs/${tabId}/navigate`, {
         method: "POST",
         body: JSON.stringify({ ...rest, userId }),
+      });
+      return toToolResult(result);
+    },
+  }));
+
+  api.registerTool((ctx: ToolContext) => ({
+    name: "camofox_go_back",
+    description: "Navigate back in browser history.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "string", description: "Tab ID" },
+        userId: { type: "string", description: "User ID for session isolation" },
+      },
+      required: ["tabId", "userId"],
+    },
+    async execute(_id, params) {
+      const { tabId, userId } = params as { tabId: string; userId: string };
+      const result = await fetchApi(baseUrl, `/tabs/${tabId}/back`, {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      });
+      return toToolResult(result);
+    },
+  }));
+
+  api.registerTool((ctx: ToolContext) => ({
+    name: "camofox_go_forward",
+    description: "Navigate forward in browser history.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "string", description: "Tab ID" },
+        userId: { type: "string", description: "User ID for session isolation" },
+      },
+      required: ["tabId", "userId"],
+    },
+    async execute(_id, params) {
+      const { tabId, userId } = params as { tabId: string; userId: string };
+      const result = await fetchApi(baseUrl, `/tabs/${tabId}/forward`, {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      });
+      return toToolResult(result);
+    },
+  }));
+
+  api.registerTool((ctx: ToolContext) => ({
+    name: "camofox_refresh",
+    description: "Refresh the current page.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "string", description: "Tab ID" },
+        userId: { type: "string", description: "User ID for session isolation" },
+      },
+      required: ["tabId", "userId"],
+    },
+    async execute(_id, params) {
+      const { tabId, userId } = params as { tabId: string; userId: string };
+      const result = await fetchApi(baseUrl, `/tabs/${tabId}/refresh`, {
+        method: "POST",
+        body: JSON.stringify({ userId }),
       });
       return toToolResult(result);
     },
@@ -573,18 +654,18 @@ export default function register(api: PluginApi) {
   if (api.registerHealthCheck) {
     api.registerHealthCheck("camofox-browser", async () => {
       try {
-        const health = (await fetchApi(baseUrl, "/health")) as {
-          status: string;
-          engine?: string;
-          activeTabs?: number;
-        };
+        const healthResp = await fetchHealth(baseUrl);
+        const health = healthResp.data;
         return {
-          status: "ok",
-          message: `Server running (${health.engine || "camoufox"})`,
+          status: healthResp.ok ? "ok" : "warn",
+          message: `Server ${health.status || "unknown"} (HTTP ${healthResp.httpStatus})`,
           details: {
             url: baseUrl,
-            engine: health.engine,
-            activeTabs: health.activeTabs,
+            status: health.status,
+            consecutiveFailures: health.consecutiveFailures,
+            activeOps: health.activeOps,
+            tabs: health.tabs,
+            sessions: health.sessions,
             managed: serverProcess !== null,
           },
         };
@@ -608,8 +689,12 @@ export default function register(api: PluginApi) {
   if (api.registerRpc) {
     api.registerRpc("camofox.health", async () => {
       try {
-        const health = await fetchApi(baseUrl, "/health");
-        return { status: "ok", ...health };
+        const healthResp = await fetchHealth(baseUrl);
+        return {
+          status: healthResp.ok ? "ok" : "degraded",
+          httpStatus: healthResp.httpStatus,
+          ...healthResp.data,
+        };
       } catch (err) {
         return { status: "error", error: (err as Error).message };
       }
@@ -640,15 +725,14 @@ export default function register(api: PluginApi) {
           .description("Show server status")
           .action(async () => {
             try {
-              const health = (await fetchApi(baseUrl, "/health")) as {
-                status: string;
-                engine?: string;
-                activeTabs?: number;
-              };
-              console.log(`Camoufox server: ${health.status}`);
+              const healthResp = await fetchHealth(baseUrl);
+              const health = healthResp.data;
+              console.log(`Camoufox server: ${health.status || "unknown"} (HTTP ${healthResp.httpStatus})`);
               console.log(`  URL: ${baseUrl}`);
-              console.log(`  Engine: ${health.engine || "camoufox"}`);
-              console.log(`  Active tabs: ${health.activeTabs ?? 0}`);
+              console.log(`  Consecutive failures: ${health.consecutiveFailures ?? 0}`);
+              console.log(`  Active ops: ${health.activeOps ?? 0}`);
+              console.log(`  Tabs: ${health.tabs ?? 0}`);
+              console.log(`  Sessions: ${health.sessions ?? 0}`);
               console.log(`  Managed: ${serverProcess !== null}`);
             } catch {
               console.log(`Camoufox server: not reachable`);

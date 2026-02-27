@@ -34,16 +34,23 @@ POST /tabs/:tabId/navigate
 # Or use macro:
 {"userId": "agent1", "macro": "@google_search", "query": "weather today"}
 ```
+Responses include `refsAvailable: true/false` indicating if element refs are ready for interaction.
 
 ### Get Snapshot
 ```bash
 GET /tabs/:tabId/snapshot?userId=agent1
+# With pagination:
+GET /tabs/:tabId/snapshot?userId=agent1&offset=80000
 ```
 Returns accessibility tree with refs:
 ```
 [heading] Example Domain
 [paragraph] This domain is for use in examples.
 [link e1] More information...
+```
+For large pages, response includes truncation metadata:
+```json
+{"truncated": true, "totalChars": 250000, "hasMore": true, "nextOffset": 80000}
 ```
 
 ### Click Element
@@ -53,6 +60,7 @@ POST /tabs/:tabId/click
 # Or CSS selector:
 {"userId": "agent1", "selector": "button.submit"}
 ```
+Responses include `refsAvailable: true/false` indicating if element refs are ready for interaction.
 
 ### Type Text
 ```bash
@@ -112,6 +120,12 @@ Returns (error): `{"ok": false, "error": "...", "errorType": "js_error" | "timeo
 POST /tabs/:tabId/back     {"userId": "agent1"}
 POST /tabs/:tabId/forward  {"userId": "agent1"}
 POST /tabs/:tabId/refresh  {"userId": "agent1"}
+```
+
+### Health
+Enhanced health endpoint returns 503 during recovery:
+```json
+{"status": "degraded", "consecutiveFailures": 3, "activeOps": 2}
 ```
 
 ### Get Links
@@ -256,6 +270,19 @@ Refs like `e1`, `e2` are stable identifiers for page elements:
 - `sessionKey` groups tabs by conversation/task (legacy: `listItemId` also accepted)
 - Sessions timeout after 30 minutes of inactivity
 - Delete all user data: `DELETE /sessions/:userId`
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CAMOFOX_MAX_SNAPSHOT_CHARS` | 80000 | Max characters in snapshot before truncation |
+| `CAMOFOX_SNAPSHOT_TAIL_CHARS` | 5000 | Characters preserved at end of truncated snapshot |
+| `CAMOFOX_BUILDREFS_TIMEOUT_MS` | 12000 | Timeout for building element refs |
+| `CAMOFOX_TAB_LOCK_TIMEOUT_MS` | 30000 | Timeout for acquiring tab lock |
+| `CAMOFOX_HEALTH_PROBE_INTERVAL_MS` | 60000 | Health probe check interval |
+| `CAMOFOX_FAILURE_THRESHOLD` | 3 | Consecutive failures before health degradation |
+| `CAMOFOX_YT_DLP_TIMEOUT_MS` | 30000 | Timeout for yt-dlp subtitle extraction |
+| `CAMOFOX_YT_BROWSER_TIMEOUT_MS` | 25000 | Timeout for browser transcript fallback |
 
 ## Running Engines
 
