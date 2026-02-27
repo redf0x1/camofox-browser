@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.6.0] — 2026-02-27
+
+### Added
+- YouTube transcript extraction via `POST /youtube/transcript` — yt-dlp primary with browser fallback, supports multiple languages
+- Snapshot truncation/windowing for large pages — offset-based pagination with configurable max chars
+- Browser health tracking — `GET /health` returns 503 during recovery with `consecutiveFailures` and `activeOps` fields
+- `refsAvailable` flag in navigate and click responses indicating if element refs are ready
+- Auto-refresh stale refs when `refs.size === 0` during click operations
+- Plugin tools: `camofox_go_back`, `camofox_go_forward`, `camofox_refresh`
+- Plugin: `offset` parameter for `camofox_snapshot` tool with truncation metadata
+- 8 new environment variables: `CAMOFOX_MAX_SNAPSHOT_CHARS`, `CAMOFOX_SNAPSHOT_TAIL_CHARS`, `CAMOFOX_BUILDREFS_TIMEOUT_MS`, `CAMOFOX_TAB_LOCK_TIMEOUT_MS`, `CAMOFOX_HEALTH_PROBE_INTERVAL_MS`, `CAMOFOX_FAILURE_THRESHOLD`, `CAMOFOX_YT_DLP_TIMEOUT_MS`, `CAMOFOX_YT_BROWSER_TIMEOUT_MS`
+- Dockerfile: yt-dlp installation with pinned version
+
+### Fixed
+- Case-insensitive click timeout detection
+- Snapshot cache invalidation on back/forward/refresh navigation
+- OpenClaw stale refs handling
+- Health state `resetHealth()` properly resets `activeOps`
+- YouTube transcript: concurrency control, orphaned promise handling
+- Plugin navigation tools derive `userId` from context instead of explicit parameter
+
 ## [1.5.2] — 2026-02-20
 ### Improved
 - Download metadata now includes `contentUrl` for direct file retrieval by AI agents
@@ -25,7 +46,7 @@
 ### Docs
 - Updated Docker examples in README.md and AGENTS.md with volume mount
 
-## [1.5.0] - 2025-02-20
+## [1.5.0] - 2026-02-20
 
 ### Added
 - Download lifecycle management (register, list, get, delete, cleanup with TTL)

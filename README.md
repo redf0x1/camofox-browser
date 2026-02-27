@@ -49,6 +49,9 @@
 - **Cookie Persistence** — import Netscape/Playwright-style cookies into a session (optional, gated by API key)
 - **OpenClaw Plugin** — OpenClaw-compatible endpoints (`/start`, `/tabs/open`, `/act`, etc.)
 - **TypeScript** — strict mode, typed request shapes, modular Express routes
+- **YouTube Transcript Extraction** — yt-dlp primary pipeline with browser fallback
+- **Snapshot Pagination** — offset-based windowing for large page snapshots
+- **Browser Health Monitoring** — health probe with recovery/degraded state tracking
 
 ## Quick Start
 
@@ -149,7 +152,7 @@ AI Agent (MCP / OpenClaw / REST Client)
 └──────────────────────────────────────────┘
 ```
 
-### Persistent Profiles (v1.3.0+)
+### Persistent Profiles (v1.3.0)
 
 - Each `userId` runs in its own persistent Firefox process/context (backed by `launchPersistentContext(userDataDir)`)
 - Profile data is stored at `~/.camofox/profiles/{userId}/` (override via `CAMOFOX_PROFILES_DIR`)
@@ -186,6 +189,10 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 | DELETE | `/tabs/:tabId` | Close a tab (expects JSON body: `{ "userId": "..." }`) | Body: `userId` | None |
 | DELETE | `/tabs/group/:listItemId` | Close a tab group (expects JSON body: `{ "userId": "..." }`) | Body: `userId` | None |
 | DELETE | `/sessions/:userId` | Close all sessions for a user | Path: `userId` | None |
+
+| Endpoint | Description | Required |
+|----------|-------------|----------|
+| `POST /youtube/transcript` | Extract transcript from YouTube video | `url`, `languages?` |
 
 ### OpenClaw Endpoints
 
@@ -266,6 +273,14 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `PROXY_PORT` | (empty) | Proxy port |
 | `PROXY_USERNAME` | (empty) | Proxy username |
 | `PROXY_PASSWORD` | (empty) | Proxy password |
+| `CAMOFOX_MAX_SNAPSHOT_CHARS` | `80000` | Max characters in snapshot before truncation |
+| `CAMOFOX_SNAPSHOT_TAIL_CHARS` | `5000` | Characters preserved at end of truncated snapshot |
+| `CAMOFOX_BUILDREFS_TIMEOUT_MS` | `12000` | Timeout for building element refs |
+| `CAMOFOX_TAB_LOCK_TIMEOUT_MS` | `30000` | Timeout for acquiring tab lock |
+| `CAMOFOX_HEALTH_PROBE_INTERVAL_MS` | `60000` | Health probe check interval |
+| `CAMOFOX_FAILURE_THRESHOLD` | `3` | Consecutive failures before health degradation |
+| `CAMOFOX_YT_DLP_TIMEOUT_MS` | `30000` | Timeout for yt-dlp subtitle extraction |
+| `CAMOFOX_YT_BROWSER_TIMEOUT_MS` | `25000` | Timeout for browser transcript fallback |
 
 ## Deployment
 
@@ -325,10 +340,16 @@ src/
 │   └── openclaw.ts     # OpenClaw compatibility (~7 endpoints)
 ├── services/
 │   ├── browser.ts      # Browser lifecycle + persistent context pool
+│   ├── health.ts       # Browser health tracking
 │   ├── session.ts      # Session management + limits
-│   └── tab.ts          # Tab operations (snapshot/click/type/etc.)
+│   ├── tab.ts          # Tab operations (snapshot/click/type/etc.)
+│   └── youtube.ts      # YouTube transcript extraction
 ├── middleware/         # Auth, logging, errors
-└── utils/              # Config, presets, macros
+└── utils/
+  ├── config.ts       # Environment config parsing
+  ├── macros.ts       # Search macro expansion
+  ├── presets.ts      # Geo preset definitions/loader
+  └── snapshot.ts     # Snapshot truncation/windowing
 ```
 
 ## Contributing
