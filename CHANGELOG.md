@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.6.2] — 2026-02-27
+
+### Fixed
+- **Node.js engine requirement** — Updated `engines.node` from `>=18` to `>=22` to match actual runtime requirement (`camoufox-js` is ESM-only, requires Node 22+ for CJS interop)
+
 ## [1.6.1] — 2026-02-27
 
 ### Fixed
