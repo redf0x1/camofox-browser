@@ -342,7 +342,11 @@ export function createTabState(page: Page): TabState {
 	};
 }
 
-export async function navigateTab(tabId: string, tabState: TabState, params: { url?: string; macro?: string; query?: string }): Promise<{ ok: true; url: string }>{
+export async function navigateTab(
+	tabId: string,
+	tabState: TabState,
+	params: { url?: string; macro?: string; query?: string },
+): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	const { url, macro, query } = params;
 	let targetUrl = url;
 	if (macro) {
@@ -364,7 +368,7 @@ export async function navigateTab(tabId: string, tabState: TabState, params: { u
 		await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 		tabState.visitedUrls.add(targetUrl);
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url() };
+		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
 }
 
@@ -379,7 +383,11 @@ export async function snapshotTab(tabState: TabState): Promise<{ url: string; sn
 	};
 }
 
-export async function clickTab(tabId: string, tabState: TabState, params: { ref?: string; selector?: string }): Promise<{ ok: true; url: string }>{
+export async function clickTab(
+	tabId: string,
+	tabState: TabState,
+	params: { ref?: string; selector?: string },
+): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	const { ref, selector } = params;
 	if (!ref && !selector) {
 		const err = new Error('ref or selector required');
@@ -420,7 +428,7 @@ export async function clickTab(tabId: string, tabState: TabState, params: { ref?
 						log('warn', 'force click failed, trying mouse sequence');
 						await dispatchMouseSequence(locator);
 					}
-				} else if (message.includes('not visible') || message.includes('timeout')) {
+				} else if (message.includes('not visible') || message.toLowerCase().includes('timeout')) {
 					log('warn', 'click timeout, trying mouse sequence');
 					await dispatchMouseSequence(locator);
 				} else {
@@ -430,7 +438,12 @@ export async function clickTab(tabId: string, tabState: TabState, params: { ref?
 		};
 
 		if (ref) {
-			const locator = refToLocator(tabState.page, ref, tabState.refs);
+			let locator = refToLocator(tabState.page, ref, tabState.refs);
+			if (!locator && tabState.refs.size === 0) {
+				log('info', 'auto-refreshing stale refs before click', { ref });
+				tabState.refs = await buildRefs(tabState.page);
+				locator = refToLocator(tabState.page, ref, tabState.refs);
+			}
 			if (!locator) {
 				const maxRef = tabState.refs.size > 0 ? `e${tabState.refs.size}` : 'none';
 				throw new Error(
@@ -447,7 +460,7 @@ export async function clickTab(tabId: string, tabState: TabState, params: { ref?
 
 		const newUrl = tabState.page.url();
 		tabState.visitedUrls.add(newUrl);
-		return { ok: true as const, url: newUrl };
+		return { ok: true as const, url: newUrl, refsAvailable: tabState.refs.size > 0 };
 	});
 }
 
@@ -660,27 +673,27 @@ export async function evaluateTab(
 	});
 }
 
-export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{
+export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.goBack({ timeout: 10000 });
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url() };
+		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
 }
 
-export async function forwardTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{
+export async function forwardTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.goForward({ timeout: 10000 });
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url() };
+		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
 }
 
-export async function refreshTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{
+export async function refreshTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.reload({ timeout: 30000 });
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url() };
+		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
 }
 
