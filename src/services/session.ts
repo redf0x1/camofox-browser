@@ -35,6 +35,7 @@ export async function withUserLimit<T>(
 	userId: string,
 	maxConcurrent: number,
 	operation: () => Promise<T>,
+	operationTimeoutMs?: number,
 ): Promise<T> {
 	const key = String(userId).toLowerCase().trim();
 	let state = userConcurrency.get(key);
@@ -61,6 +62,18 @@ export async function withUserLimit<T>(
 	state.active++;
 	incrementActiveOps();
 	try {
+		if (typeof operationTimeoutMs === 'number' && Number.isFinite(operationTimeoutMs) && operationTimeoutMs > 0) {
+			let operationTimer: NodeJS.Timeout | undefined;
+			return await Promise.race<T>([
+				operation(),
+				new Promise<T>((_resolve, reject) => {
+					operationTimer = setTimeout(() => reject(new Error('User operation timed out')), operationTimeoutMs);
+				}),
+			]).finally(() => {
+				if (operationTimer) clearTimeout(operationTimer);
+			});
+		}
+
 		return await operation();
 	} finally {
 		decrementActiveOps();
@@ -93,6 +106,8 @@ function cleanupSessionsForUserId(userId: string, reason: string): void {
 			log('info', 'session cleaned up', { userId: key, reason });
 		}
 	}
+
+	userConcurrency.delete(prefix);
 }
 
 contextPool.onEvict((userId) => {

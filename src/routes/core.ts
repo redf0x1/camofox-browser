@@ -1031,6 +1031,7 @@ router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?:
 		? languages.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
 		: [];
 	const lang = preferredLanguages[0] || 'en';
+	const transcriptOpTimeoutMs = Math.max(CONFIG.ytDlpTimeoutMs, CONFIG.ytBrowserTimeoutMs) + 5000;
 
 	try {
 		const result = await withUserLimit(userId, CONFIG.maxConcurrentPerUser, async () => {
@@ -1050,7 +1051,7 @@ router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?:
 				}
 			}
 			return await browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs);
-		});
+		}, transcriptOpTimeoutMs);
 
 		log('info', 'youtube transcript extracted', {
 			reqId,

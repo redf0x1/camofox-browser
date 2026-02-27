@@ -16,7 +16,7 @@ RUN npm run build
 FROM node:22-slim
 WORKDIR /app
 
-ARG YT_DLP_VERSION=2025.02.19
+ARG YT_DLP_VERSION=2026.02.21
 
 # Persistent data defaults (profiles/downloads/cookies live under /home/node/.camofox)
 ENV CAMOFOX_PROFILES_DIR=/home/node/.camofox/profiles

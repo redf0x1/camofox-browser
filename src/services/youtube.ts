@@ -170,15 +170,18 @@ export async function ytDlpTranscript(
 
 	try {
 		const outputTemplate = path.join(tempDir, 'subtitle.%(ext)s');
-		const subLangs = `${normalizedLang},${normalizedLang.replace('-', '_')},en.*`;
+		const subLangs = normalizedLang === 'en' ? 'en' : `${normalizedLang},en`;
 
 		await runYtDlp(
 			ytDlpPath,
 			[
 				normalizedUrl,
+				'--js-runtimes',
+				'node',
 				'--skip-download',
 				'--write-sub',
 				'--write-auto-sub',
+				'--no-abort-on-error',
 				'--sub-langs',
 				subLangs,
 				'--sub-format',
@@ -191,7 +194,7 @@ export async function ytDlpTranscript(
 
 		const titleResult = await runYtDlp(
 			ytDlpPath,
-			[normalizedUrl, '--skip-download', '--print', 'title'],
+			[normalizedUrl, '--js-runtimes', 'node', '--skip-download', '--print', 'title'],
 			Math.min(timeoutMs, 15000),
 		);
 		const videoTitle = titleResult.stdout.trim().split('\n').filter(Boolean)[0] || '';
@@ -277,108 +280,117 @@ export async function browserTranscript(
 
 	const entry = await contextPool.ensureContext(INTERNAL_TRANSCRIPT_USER_ID);
 	const page = await entry.context.newPage();
+	let hardTimeoutTimer: NodeJS.Timeout | undefined;
 
 	try {
-		await page.route('**/*.{png,jpg,jpeg,gif,svg,woff,woff2,css}', (route) => route.abort());
-		const timedTextPromise = await setupTimedTextCapture(page);
+		return await Promise.race<YouTubeTranscriptResult>([
+			(async () => {
+				await page.route('**/*.{png,jpg,jpeg,gif,svg,woff,woff2,css}', (route) => route.abort());
+				const timedTextPromise = await setupTimedTextCapture(page);
 
-		await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+				await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
 
-		const meta = await page.evaluate(
-			async ({ preferredLang }) => {
-				const doc = (globalThis as unknown as { document?: { querySelector: (selector: string) => { innerText?: string } | null; title?: string } }).document;
-				const video = doc?.querySelector('video') as { muted?: boolean; play?: () => Promise<void> } | null;
-				if (video) {
-					video.muted = true;
-					try {
-						await video.play?.();
-					} catch {
-						// ignore autoplay failures
-					}
-				}
+				const meta = await page.evaluate(
+					async ({ preferredLang }) => {
+						const doc = (globalThis as unknown as { document?: { querySelector: (selector: string) => { innerText?: string } | null; title?: string } }).document;
+						const video = doc?.querySelector('video') as { muted?: boolean; play?: () => Promise<void> } | null;
+						if (video) {
+							video.muted = true;
+							try {
+								await video.play?.();
+							} catch {
+								// ignore autoplay failures
+							}
+						}
 
-				const title = doc?.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.innerText
-					|| doc?.title
-					|| '';
+						const title = doc?.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.innerText
+							|| doc?.title
+							|| '';
 
-				const player = (globalThis as unknown as {
-					ytInitialPlayerResponse?: {
-						captions?: {
-							playerCaptionsTracklistRenderer?: {
-								captionTracks?: Array<{
-									baseUrl?: string;
-									languageCode?: string;
-									kind?: string;
-									name?: { simpleText?: string; runs?: Array<{ text?: string }> };
-								}>;
+						const player = (globalThis as unknown as {
+							ytInitialPlayerResponse?: {
+								captions?: {
+									playerCaptionsTracklistRenderer?: {
+										captionTracks?: Array<{
+											baseUrl?: string;
+											languageCode?: string;
+											kind?: string;
+											name?: { simpleText?: string; runs?: Array<{ text?: string }> };
+										}>;
+									};
+								};
 							};
-						};
-					};
-				}).ytInitialPlayerResponse;
-				const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-				const availableLanguages = tracks.map((track) => ({
-					code: track.languageCode || '',
-					name:
-						track.name?.simpleText
-						|| (track.name?.runs || []).map((run) => run.text || '').join('')
-						|| track.languageCode
-						|| 'unknown',
-					kind: track.kind || 'subtitles',
-				}));
+						}).ytInitialPlayerResponse;
+						const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+						const availableLanguages = tracks.map((track) => ({
+							code: track.languageCode || '',
+							name:
+								track.name?.simpleText
+								|| (track.name?.runs || []).map((run) => run.text || '').join('')
+								|| track.languageCode
+								|| 'unknown',
+							kind: track.kind || 'subtitles',
+						}));
 
-				const selected =
-					tracks.find((track) => track.languageCode === preferredLang)
-					|| tracks.find((track) => (track.languageCode || '').startsWith(preferredLang.split('-')[0]))
-					|| tracks[0]
-					|| null;
+						const selected =
+							tracks.find((track) => track.languageCode === preferredLang)
+							|| tracks.find((track) => (track.languageCode || '').startsWith(preferredLang.split('-')[0]))
+							|| tracks[0]
+							|| null;
 
-				if (selected?.baseUrl) {
-					const timedTextUrl = selected.baseUrl.includes('fmt=')
-						? selected.baseUrl
-						: `${selected.baseUrl}${selected.baseUrl.includes('?') ? '&' : '?'}fmt=json3`;
-					try {
-						await fetch(timedTextUrl, { credentials: 'include' });
-					} catch {
-						// network listener may still capture player request
-					}
+						if (selected?.baseUrl) {
+							const timedTextUrl = selected.baseUrl.includes('fmt=')
+								? selected.baseUrl
+								: `${selected.baseUrl}${selected.baseUrl.includes('?') ? '&' : '?'}fmt=json3`;
+							try {
+								await fetch(timedTextUrl, { credentials: 'include' });
+							} catch {
+								// network listener may still capture player request
+							}
+						}
+
+						return { title, availableLanguages };
+					},
+					{ preferredLang: normalizedLang },
+				);
+
+				let timer: NodeJS.Timeout | undefined;
+				const timedTextResponse = await Promise.race<string>([
+					timedTextPromise,
+					new Promise<string>((_resolve, reject) => {
+						timer = setTimeout(() => reject(new Error('Timedtext response timeout')), timeoutMs);
+					}),
+				]).finally(() => {
+					if (timer) clearTimeout(timer);
+				});
+
+				const transcript = parseJson3(timedTextResponse);
+				if (!transcript || !transcript.trim()) {
+					throw new Error('Failed to parse transcript from browser fallback');
 				}
 
-				return { title, availableLanguages };
-			},
-			{ preferredLang: normalizedLang },
-		);
-
-		let timer: NodeJS.Timeout | undefined;
-		const timedTextResponse = await Promise.race<string>([
-			timedTextPromise,
-			new Promise<string>((_resolve, reject) => {
-				timer = setTimeout(() => reject(new Error('Timedtext response timeout')), timeoutMs);
+				return {
+					status: 'ok',
+					transcript,
+					video_url: normalizedUrl,
+					video_id: videoId,
+					video_title: meta.title,
+					title: meta.title,
+					language: normalizedLang,
+					total_words: countWords(transcript),
+					available_languages: (meta.availableLanguages || []).map((item: { code?: string; name?: string; kind?: string }) => ({
+						code: item.code || '',
+						name: item.name || 'unknown',
+						kind: item.kind || 'subtitles',
+					})),
+				};
+			})(),
+			new Promise<YouTubeTranscriptResult>((_resolve, reject) => {
+				hardTimeoutTimer = setTimeout(() => reject(new Error('Browser transcript timed out')), timeoutMs);
 			}),
-		]).finally(() => {
-			if (timer) clearTimeout(timer);
-		});
-
-		const transcript = parseJson3(timedTextResponse);
-		if (!transcript || !transcript.trim()) {
-			throw new Error('Failed to parse transcript from browser fallback');
-		}
-
-		return {
-			status: 'ok',
-			transcript,
-			video_url: normalizedUrl,
-			video_id: videoId,
-			video_title: meta.title,
-			title: meta.title,
-			language: normalizedLang,
-			total_words: countWords(transcript),
-			available_languages: (meta.availableLanguages || []).map((item: { code?: string; name?: string; kind?: string }) => ({
-				code: item.code || '',
-				name: item.name || 'unknown',
-				kind: item.kind || 'subtitles',
-			})),
-		};
+		]);
 	} finally {
+		if (hardTimeoutTimer) clearTimeout(hardTimeoutTimer);
 		await page.close().catch(() => {});
 	}
 }

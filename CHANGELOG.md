@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.6.1] — 2026-02-27
+
+### Fixed
+- **YouTube transcript: yt-dlp updated to 2026.02.21** — Previous version (2025.02.19) had broken nsig extraction causing all subtitle downloads to fail
+- **YouTube transcript: narrowed subtitle language selection** — `en.*` wildcard pattern was matching auto-translated tracks, triggering YouTube 429 rate-limiting
+- **YouTube transcript: added `--js-runtimes node` flag** — yt-dlp 2026.x EJS system requires explicit JS runtime declaration
+- **YouTube transcript: added `--no-abort-on-error` flag** — Prevents yt-dlp from failing entirely when one subtitle track 429s
+- **Browser transcript fallback: added hard timeout** — `Promise.race` wrapper prevents indefinite Playwright Firefox hangs (known Playwright issue)
+- **Concurrency leak fix: `withUserLimit` operation timeout** — Added optional operation-level timeout to prevent permanently stuck concurrency slots
+- **Session cleanup: reset `userConcurrency` on session deletion** — `cleanupSessionsForUserId` now properly clears the concurrency tracking Map
+
 ## [1.6.0] — 2026-02-27
 
 ### Added
