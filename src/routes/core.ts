@@ -365,7 +365,10 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 					tabState.refs = await buildRefs(tabState.page);
 					tabState.lastSnapshot = null;
 					recordNavSuccess();
-					return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
+					return {
+						status: 200 as const,
+						body: { ok: true, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 },
+					};
 				}),
 				CONFIG.handlerTimeoutMs,
 				'navigate',

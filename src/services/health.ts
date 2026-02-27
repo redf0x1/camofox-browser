@@ -26,6 +26,12 @@ export function recordNavSuccess(): void {
 	healthState.lastSuccessfulNav = Date.now();
 }
 
+/**
+ * Records a navigation failure. Returns true when consecutive failures
+ * exceed the threshold, signaling the caller to take corrective action
+ * (e.g., log warning, attempt context restart).
+ * Note: Automatic recovery is not implemented — callers decide what action to take.
+ */
 export function recordNavFailure(): boolean {
 	healthState.consecutiveNavFailures++;
 	const exceeded = healthState.consecutiveNavFailures >= CONFIG.failureThreshold;
@@ -54,4 +60,5 @@ export function resetHealth(): void {
 	healthState.consecutiveNavFailures = 0;
 	healthState.lastSuccessfulNav = Date.now();
 	healthState.isRecovering = false;
+	healthState.activeOps = 0;
 }

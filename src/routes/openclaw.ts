@@ -178,7 +178,12 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 					tabState.refs = await buildRefs(tabState.page);
 					tabState.lastSnapshot = null;
 					recordNavSuccess();
-					return { ok: true, targetId, url: tabState.page.url() };
+					return {
+						ok: true,
+						targetId,
+						url: tabState.page.url(),
+						refsAvailable: tabState.refs.size > 0,
+					};
 				}),
 				CONFIG.handlerTimeoutMs,
 				'openclaw-navigate',
@@ -324,7 +329,12 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					};
 
 					if (ref) {
-						const locator = refToLocator(tabState.page, ref, tabState.refs);
+						let locator = refToLocator(tabState.page, ref, tabState.refs);
+						if (!locator && tabState.refs.size === 0) {
+							log('info', 'auto-refreshing stale refs before click', { ref });
+							tabState.refs = await buildRefs(tabState.page);
+							locator = refToLocator(tabState.page, ref, tabState.refs);
+						}
 						if (!locator) throw new Error(`Unknown ref: ${ref}`);
 						await doClick(locator);
 					} else {
@@ -334,7 +344,12 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					await tabState.page.waitForTimeout(500);
 					tabState.refs = await buildRefs(tabState.page);
 					tabState.lastSnapshot = null;
-					return { ok: true, targetId, url: tabState.page.url() };
+					return {
+						ok: true,
+						targetId,
+						url: tabState.page.url(),
+						refsAvailable: tabState.refs.size > 0,
+					};
 				}
 
 				case 'type': {

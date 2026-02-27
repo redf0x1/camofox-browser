@@ -783,6 +783,7 @@ export async function evaluateTab(
 export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.goBack({ timeout: 10000 });
+		tabState.lastSnapshot = null;
 		tabState.refs = await buildRefs(tabState.page);
 		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
@@ -791,6 +792,7 @@ export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: 
 export async function forwardTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.goForward({ timeout: 10000 });
+		tabState.lastSnapshot = null;
 		tabState.refs = await buildRefs(tabState.page);
 		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
@@ -799,6 +801,7 @@ export async function forwardTab(tabId: string, tabState: TabState): Promise<{ o
 export async function refreshTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.reload({ timeout: 30000 });
+		tabState.lastSnapshot = null;
 		tabState.refs = await buildRefs(tabState.page);
 		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
 	});
