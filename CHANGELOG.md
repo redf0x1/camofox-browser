@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.0] — 2025-07-15
+
+### Added
+- **noVNC browser viewer** — See the browser GUI through your web browser when in virtual/headed mode
+- **Auto VNC start/stop** — VNC automatically starts when toggling to virtual/headed mode and stops when switching back to headless
+- **`CAMOFOX_VNC_TIMEOUT_MS`** — Configurable VNC session timeout (default: 120000ms / 2 minutes)
+- **VNC URL in toggle-display response** — Response includes `vncUrl` field when VNC is active
+- **VNC lifecycle management** — Automatic cleanup on session delete, context close, and server shutdown
+
 ## [1.7.1] — 2025-07-15
 
 ### Fixed

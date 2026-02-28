@@ -22,6 +22,7 @@ import {
 } from './services/download';
 import { getHealthState, resetHealth, setRecovering } from './services/health';
 import { detectYtDlp } from './services/youtube';
+import { stopAllVnc } from './services/vnc';
 
 const CONFIG = loadConfig();
 
@@ -79,6 +80,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 	}
 
 	await closeAllSessions().catch(() => {});
+	stopAllVnc();
 	stopSessionCleanupInterval();
 	stopDownloadCleanupInterval();
 	if (healthProbeInterval) {

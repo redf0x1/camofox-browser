@@ -96,6 +96,23 @@ export class ContextPool {
 		return this.pool.get(userId);
 	}
 
+	getDisplayForUser(userId: string): string | null {
+		const entry = this.pool.get(String(userId));
+		if (!entry) return null;
+
+		if (entry.virtualDisplay) {
+			try {
+				const display = entry.virtualDisplay.get();
+				return typeof display === 'string' ? display : null;
+			} catch {
+				return null;
+			}
+		}
+
+		const processDisplay = process.env.DISPLAY;
+		return typeof processDisplay === 'string' && processDisplay ? processDisplay : null;
+	}
+
 	size(): number {
 		return this.pool.size;
 	}
@@ -309,3 +326,7 @@ export class ContextPool {
 }
 
 export const contextPool = new ContextPool();
+
+export function getDisplayForUser(userId: string): string | null {
+	return contextPool.getDisplayForUser(userId);
+}

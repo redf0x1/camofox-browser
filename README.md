@@ -89,6 +89,7 @@ docker build -t camofox-browser .
 docker run -d \
   --name camofox-browser \
   -p 9377:9377 \
+  -p 6080:6080 \
   -v ~/.camofox:/home/node/.camofox \
   camofox-browser
 ```
@@ -99,6 +100,7 @@ To persist browser profiles (cookies, localStorage, IndexedDB, etc.) across cont
 docker run -d \
   --name camofox-browser \
   -p 9377:9377 \
+  -p 6080:6080 \
   -v ~/.camofox:/home/node/.camofox \
   camofox-browser
 ```
@@ -193,13 +195,35 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 ### Toggle Display Mode
 ```bash
 POST /sessions/:userId/toggle-display
-{"headless": false}
+{"headless": "virtual"}
 ```
 Switch browser between headless and headed mode. When encountering CAPTCHAs or issues requiring visual interaction, switch to headed mode to show the browser window.
 
-Returns: `{"ok": true, "headless": false, "message": "Browser restarted in headed mode. Previous tabs invalidated — create new tabs.", "userId": "agent1"}`
+Returns:
+```json
+{"ok": true, "headless": "virtual", "vncUrl": "http://localhost:6080/vnc.html?autoconnect=true&resize=scale&token=...", "message": "Browser visible via VNC", "userId": "agent1"}
+```
 
 **Note:** This restarts the browser context. All tabs are invalidated but cookies/auth state persist via the persistent profile.
+
+### Browser Viewer (noVNC)
+When the display mode is set to `"virtual"` or `false`, the server automatically starts a VNC viewer accessible via web browser.
+
+```bash
+# 1. Switch to virtual mode
+POST /sessions/:userId/toggle-display
+{"headless": "virtual"}
+# Response includes vncUrl — open in browser to see Firefox
+
+# 2. Solve CAPTCHA or interact with the browser
+
+# 3. Switch back to headless
+POST /sessions/:userId/toggle-display
+{"headless": true}
+# VNC automatically stops
+```
+
+The VNC session auto-terminates after 2 minutes (configurable via `CAMOFOX_VNC_TIMEOUT_MS`).
 
 | Endpoint | Description | Required |
 |----------|-------------|----------|
@@ -275,6 +299,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
 | `CAMOFOX_API_KEY` | (empty) | Enables cookie import endpoint; sent via `Authorization: Bearer ...` |
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
+| `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
 | `CAMOFOX_COOKIES_DIR` | `~/.camofox/cookies` | Directory used by the OpenClaw plugin cookie tool |
 | `CAMOFOX_PROFILES_DIR` | `~/.camofox/profiles` | Profile storage directory (persistent per-user Firefox profiles) |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |
@@ -300,7 +325,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 
 ```bash
 docker build -t camofox-browser .
-docker run -p 9377:9377 \
+docker run -p 9377:9377 -p 6080:6080 \
   -v ~/.camofox:/home/node/.camofox \
   -e CAMOFOX_PORT=9377 \
   camofox-browser

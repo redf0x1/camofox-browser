@@ -7,6 +7,7 @@ import { loadConfig } from '../utils/config';
 import { contextPool } from './context-pool';
 import { cleanupUserDownloads } from './download';
 import { decrementActiveOps, incrementActiveOps } from './health';
+import { stopVnc } from './vnc';
 
 const CONFIG = loadConfig();
 
@@ -92,6 +93,7 @@ function cleanupSessionsForUserId(userId: string, reason: string): void {
 	const prefix = normalizeUserId(userId);
 	// If a session is currently being created, drop our reference so callers don't keep a stale placeholder.
 	launchingSessions.delete(prefix);
+	void stopVnc(prefix).catch(() => {});
 
 	try {
 		cleanupUserDownloads(prefix);
@@ -308,6 +310,7 @@ export async function closeSessionsForUser(userId: string): Promise<void> {
 export async function closeAllSessions(): Promise<void> {
 	await contextPool.closeAll().catch(() => {});
 	for (const [userId, session] of sessions) {
+		void stopVnc(userId).catch(() => {});
 		unindexSessionTabs(session);
 		sessions.delete(userId);
 		try {

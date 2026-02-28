@@ -5,6 +5,7 @@ services:
     image: camofox-browser
     ports:
       - "9377:9377"
+      - "6080:6080"
     volumes:
       - ~/.camofox:/home/node/.camofox
     restart: unless-stopped

@@ -244,12 +244,31 @@ DELETE /tabs/:tabId?userId=agent1
 ### Toggle Display Mode
 ```bash
 POST /sessions/:userId/toggle-display
-{"headless": false}
+{"headless": "virtual"}
 ```
 Switch browser between headless (`true`), headed (`false`), or virtual display (`"virtual"`) mode.
 Restarts the browser context — all tabs are invalidated but cookies/auth persist.
 
-Returns: `{"ok": true, "headless": false, "message": "...", "userId": "agent1"}`
+Returns: `{"ok": true, "headless": "virtual", "vncUrl": "http://localhost:6080/vnc.html?autoconnect=true&resize=scale&token=...", "message": "Browser visible via VNC", "userId": "agent1"}`
+
+### Browser Viewer (noVNC)
+When the display mode is set to `"virtual"` or `false`, the server automatically starts a VNC viewer accessible via web browser.
+
+```bash
+# 1. Switch to virtual mode
+POST /sessions/:userId/toggle-display
+{"headless": "virtual"}
+# Response includes vncUrl — open in browser to see Firefox
+
+# 2. Solve CAPTCHA or interact with the browser
+
+# 3. Switch back to headless
+POST /sessions/:userId/toggle-display
+{"headless": true}
+# VNC automatically stops
+```
+
+The VNC session auto-terminates after 2 minutes (configurable via `CAMOFOX_VNC_TIMEOUT_MS`).
 
 ## Search Macros
 
@@ -286,6 +305,7 @@ Refs like `e1`, `e2` are stable identifiers for page elements:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
+| `CAMOFOX_VNC_TIMEOUT_MS` | 120000 | Timeout for VNC auto-stop (milliseconds) |
 | `CAMOFOX_MAX_SNAPSHOT_CHARS` | 80000 | Max characters in snapshot before truncation |
 | `CAMOFOX_SNAPSHOT_TAIL_CHARS` | 5000 | Characters preserved at end of truncated snapshot |
 | `CAMOFOX_BUILDREFS_TIMEOUT_MS` | 12000 | Timeout for building element refs |
@@ -316,7 +336,7 @@ npm run test:debug    # With server output
 
 ```bash
 docker build -t camofox-browser .
-docker run -d -p 9377:9377 -v ~/.camofox:/home/node/.camofox camofox-browser
+docker run -d -p 9377:9377 -p 6080:6080 -v ~/.camofox:/home/node/.camofox camofox-browser
 ```
 
 ## Key Files

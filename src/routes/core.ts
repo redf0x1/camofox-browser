@@ -8,7 +8,8 @@ import { log } from '../middleware/logging';
 import { isAuthorizedWithApiKey } from '../middleware/auth';
 import { loadConfig } from '../utils/config';
 import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
-import { contextPool } from '../services/context-pool';
+import { contextPool, getDisplayForUser } from '../services/context-pool';
+import { startVnc, stopVnc } from '../services/vnc';
 import {
 	MAX_TABS_PER_SESSION,
 	findTabById,
@@ -820,11 +821,29 @@ router.post(
 			await closeSessionsForUser(userId);
 			await contextPool.restartContext(userId, headless);
 
+			let vncUrl: string | undefined;
+			if (headless === true) {
+				await stopVnc(userId).catch(() => {});
+			} else {
+				const displayNum = getDisplayForUser(userId);
+				if (displayNum) {
+					try {
+						const vnc = await startVnc(userId, displayNum);
+						vncUrl = vnc.vncUrl;
+					} catch (vncErr) {
+						const vncMessage = vncErr instanceof Error ? vncErr.message : String(vncErr);
+						log('warn', 'vnc start failed after display toggle', { userId, error: vncMessage, displayNum });
+					}
+				}
+			}
+
 			const modeLabel = headless === false ? 'headed mode' : headless === 'virtual' ? 'virtual display mode' : 'headless mode';
 			return res.json({
 				ok: true,
 				headless,
-				message: `Browser restarted in ${modeLabel}. Previous tabs invalidated — create new tabs.`,
+				...(vncUrl
+					? { vncUrl, message: 'Browser visible via VNC' }
+					: { message: `Browser restarted in ${modeLabel}. Previous tabs invalidated — create new tabs.` }),
 				userId,
 			});
 		} catch (err) {
