@@ -34,23 +34,16 @@ POST /tabs/:tabId/navigate
 # Or use macro:
 {"userId": "agent1", "macro": "@google_search", "query": "weather today"}
 ```
-Responses include `refsAvailable: true/false` indicating if element refs are ready for interaction.
 
 ### Get Snapshot
 ```bash
 GET /tabs/:tabId/snapshot?userId=agent1
-# With pagination:
-GET /tabs/:tabId/snapshot?userId=agent1&offset=80000
 ```
 Returns accessibility tree with refs:
 ```
 [heading] Example Domain
 [paragraph] This domain is for use in examples.
 [link e1] More information...
-```
-For large pages, response includes truncation metadata:
-```json
-{"truncated": true, "totalChars": 250000, "hasMore": true, "nextOffset": 80000}
 ```
 
 ### Click Element
@@ -60,7 +53,6 @@ POST /tabs/:tabId/click
 # Or CSS selector:
 {"userId": "agent1", "selector": "button.submit"}
 ```
-Responses include `refsAvailable: true/false` indicating if element refs are ready for interaction.
 
 ### Type Text
 ```bash
@@ -122,153 +114,15 @@ POST /tabs/:tabId/forward  {"userId": "agent1"}
 POST /tabs/:tabId/refresh  {"userId": "agent1"}
 ```
 
-### Health
-Enhanced health endpoint returns 503 during recovery:
-```json
-{"status": "degraded", "consecutiveFailures": 3, "activeOps": 2}
-```
-
 ### Get Links
 ```bash
 GET /tabs/:tabId/links?userId=agent1&limit=50
 ```
 
-Additional query params:
-- `scope` — CSS selector to scope link extraction
-- `extension` — Comma-separated extensions to filter (e.g., ".pdf,.doc")
-- `downloadOnly` — Boolean, only return download-like links
-
-Example:
-```bash
-GET /tabs/:tabId/links?userId=agent1&limit=50&scope=main&extension=.pdf,.doc&downloadOnly=true
-```
-
-### List Downloads for Tab
-```bash
-GET /tabs/:tabId/downloads?userId=agent1
-```
-
-### List Downloads for User
-```bash
-GET /users/:userId/downloads
-```
-
-Example:
-```bash
-GET /users/agent1/downloads
-```
-
-### Get Download Metadata
-```bash
-GET /downloads/:downloadId?userId=agent1
-```
-
-### Get Download Content (binary stream)
-```bash
-GET /downloads/:downloadId/content?userId=agent1
-```
-
-Example:
-```bash
-curl -L "http://localhost:9377/downloads/<downloadId>/content?userId=agent1" -o downloaded.file
-```
-
-### Download Workflow for AI Agents
-
-Every download response includes `contentUrl` — use it to fetch the file:
-
-1. **Trigger download** (click download button, batch-download, etc.)
-2. **List downloads** → each entry has `contentUrl`
-3. **Fetch content** → `GET {contentUrl}` returns the binary file
-
-Example flow:
-
-```bash
-# Step 1: Download triggered (e.g., via batch-download)
-POST /tabs/:tabId/batch-download
-{"userId": "agent1", "types": ["images"], "maxFiles": 10}
-
-# Step 2: Each download in response has contentUrl
-# Response: {..., "contentUrl": "/downloads/abc123/content?userId=agent1"}
-
-# Step 3: Get the actual file
-GET /downloads/abc123/content?userId=agent1
-# Returns: binary file with proper Content-Type header
-```
-
-Files are stored at `~/.camofox/downloads/{userId}/` (configurable via `CAMOFOX_DOWNLOADS_DIR`).
-Downloads persist for 24 hours by default (configurable via `CAMOFOX_DOWNLOAD_TTL_MS`).
-
-### Delete Download
-```bash
-DELETE /downloads/:downloadId
-{"userId": "agent1"}
-```
-
-### Extract Resources
-Extract resources from the current page DOM (optionally scoped to a container).
-
-```bash
-POST /tabs/:tabId/extract-resources
-{"userId": "agent1", "selector": "div.post", "types": ["images", "links"], "extensions": [".jpg", ".png"], "resolveBlobs": true, "triggerLazyLoad": true}
-```
-
-### Batch Download
-Extract resources and download them in one request.
-
-```bash
-POST /tabs/:tabId/batch-download
-{"userId": "agent1", "selector": "div.post", "types": ["images"], "maxFiles": 50}
-```
-
-### Resolve Blob URLs
-Resolve `blob:` URLs into `data:` URIs.
-
-```bash
-POST /tabs/:tabId/resolve-blobs
-{"userId": "agent1", "urls": ["blob:https://example.com/abc123"]}
-```
-
-### YouTube Transcript
-```bash
-POST /youtube/transcript
-{"url": "https://youtube.com/watch?v=dQw4w9WgXcQ", "languages": ["en"]}
-```
-Returns: `{"status": "ok", "transcript": "[00:00] Hello...", "video_url": "https://...", "video_id": "...", "video_title": "...", "language": "en", "total_words": 123}`
-
 ### Close Tab
 ```bash
 DELETE /tabs/:tabId?userId=agent1
 ```
-
-### Toggle Display Mode
-```bash
-POST /sessions/:userId/toggle-display
-{"headless": "virtual"}
-```
-Switch browser between headless (`true`), headed (`false`), or virtual display (`"virtual"`) mode.
-Restarts the browser context — all tabs are invalidated but cookies/auth persist.
-
-Returns: `{"ok": true, "headless": "virtual", "vncUrl": "http://localhost:6080/vnc.html?autoconnect=true&resize=scale&token=...", "message": "Browser visible via VNC", "userId": "agent1"}`
-
-### Browser Viewer (noVNC)
-When the display mode is set to `"virtual"` or `false`, the server automatically starts a VNC viewer accessible via web browser.
-
-```bash
-# 1. Switch to virtual mode
-POST /sessions/:userId/toggle-display
-{"headless": "virtual"}
-# Response includes vncUrl — open in browser to see Firefox
-
-# 2. Solve CAPTCHA or interact with the browser
-
-# 3. Switch back to headless
-POST /sessions/:userId/toggle-display
-{"headless": true}
-# VNC automatically stops
-```
-
-The VNC session auto-terminates after 2 minutes (configurable via `CAMOFOX_VNC_TIMEOUT_MS`).
 
 ## Search Macros
 
@@ -300,21 +154,6 @@ Refs like `e1`, `e2` are stable identifiers for page elements:
 - Sessions timeout after 30 minutes of inactivity
 - Delete all user data: `DELETE /sessions/:userId`
 
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
-| `CAMOFOX_VNC_TIMEOUT_MS` | 120000 | Timeout for VNC auto-stop (milliseconds) |
-| `CAMOFOX_MAX_SNAPSHOT_CHARS` | 80000 | Max characters in snapshot before truncation |
-| `CAMOFOX_SNAPSHOT_TAIL_CHARS` | 5000 | Characters preserved at end of truncated snapshot |
-| `CAMOFOX_BUILDREFS_TIMEOUT_MS` | 12000 | Timeout for building element refs |
-| `CAMOFOX_TAB_LOCK_TIMEOUT_MS` | 30000 | Timeout for acquiring tab lock |
-| `CAMOFOX_HEALTH_PROBE_INTERVAL_MS` | 60000 | Health probe check interval |
-| `CAMOFOX_FAILURE_THRESHOLD` | 3 | Consecutive failures before health degradation |
-| `CAMOFOX_YT_DLP_TIMEOUT_MS` | 30000 | Timeout for yt-dlp subtitle extraction |
-| `CAMOFOX_YT_BROWSER_TIMEOUT_MS` | 25000 | Timeout for browser transcript fallback |
-
 ## Running Engines
 
 ### Camoufox (Default)
@@ -336,8 +175,16 @@ npm run test:debug    # With server output
 
 ```bash
 docker build -t camofox-browser .
-docker run -d -p 9377:9377 -p 6080:6080 -v ~/.camofox:/home/node/.camofox camofox-browser
+docker run -p 9377:9377 camofox-browser
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
+| `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
+| `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
 
 ## Key Files
 

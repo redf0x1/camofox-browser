@@ -299,6 +299,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
 | `CAMOFOX_API_KEY` | (empty) | Enables cookie import endpoint; sent via `Authorization: Bearer ...` |
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
+| `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
 | `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
 | `CAMOFOX_COOKIES_DIR` | `~/.camofox/cookies` | Directory used by the OpenClaw plugin cookie tool |
 | `CAMOFOX_PROFILES_DIR` | `~/.camofox/profiles` | Profile storage directory (persistent per-user Firefox profiles) |

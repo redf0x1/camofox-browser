@@ -80,8 +80,6 @@ export async function startVnc(
 			'-listen',
 			'127.0.0.1',
 			'-noxdamage',
-			'-ncache',
-			'10',
 		],
 		{ stdio: 'pipe' },
 	);

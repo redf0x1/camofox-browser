@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { type ChildProcess, spawn } from 'node:child_process';
 
 import { launchOptions } from 'camoufox-js';
 import { firefox, type BrowserContext, type BrowserContextOptions } from 'playwright-core';
@@ -70,6 +71,62 @@ function hasUsableLinuxDisplay(): boolean {
 
 	const lockFile = `/tmp/.X${match[1]}-lock`;
 	return fs.existsSync(lockFile);
+}
+
+async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display: string; process: ChildProcess }> {
+	let displayNum = 99;
+	while (fs.existsSync(`/tmp/.X${displayNum}-lock`)) {
+		displayNum++;
+	}
+
+	const display = `:${displayNum}`;
+	const xvfbProcess = spawn('Xvfb', [
+		display,
+		'-screen',
+		'0',
+		resolution,
+		'-ac',
+		'-nolisten',
+		'tcp',
+	], { stdio: 'pipe' });
+
+	await new Promise<void>((resolve, reject) => {
+		let settled = false;
+		const finalizeResolve = () => {
+			if (settled) return;
+			settled = true;
+			clearInterval(check);
+			clearTimeout(timeout);
+			resolve();
+		};
+		const finalizeReject = (err: Error) => {
+			if (settled) return;
+			settled = true;
+			clearInterval(check);
+			clearTimeout(timeout);
+			reject(err);
+		};
+
+		const timeout = setTimeout(() => {
+			finalizeReject(new Error('Xvfb start timeout'));
+		}, 5000);
+
+		const check = setInterval(() => {
+			if (fs.existsSync(`/tmp/.X${displayNum}-lock`)) {
+				finalizeResolve();
+			}
+		}, 100);
+
+		xvfbProcess.once('error', (err) => {
+			finalizeReject(err);
+		});
+
+		xvfbProcess.once('exit', (code, signal) => {
+			finalizeReject(new Error(`Xvfb exited early (code=${code ?? 'null'}, signal=${signal ?? 'null'})`));
+		});
+	});
+
+	return { display, process: xvfbProcess };
 }
 
 export class ContextPool {
@@ -144,8 +201,24 @@ export class ContextPool {
 		let virtualDisplay: any = undefined;
 
 		if (headless === 'virtual' || (headless === false && hostOS === 'linux' && !hasUsableLinuxDisplay())) {
-			const { VirtualDisplay } = await import('camoufox-js/dist/virtdisplay.js');
-			virtualDisplay = new VirtualDisplay();
+			const xvfb = await spawnXvfb(CONFIG.vncResolution);
+			virtualDisplay = {
+				get: () => xvfb.display,
+				kill: () => {
+					try {
+						xvfb.process.kill('SIGTERM');
+					} catch {
+						// ignore cleanup errors
+					}
+					setTimeout(() => {
+						try {
+							xvfb.process.kill('SIGKILL');
+						} catch {
+							// ignore cleanup errors
+						}
+					}, 3000).unref();
+				},
+			};
 			effectiveHeadless = false;
 			if (headless === false) {
 				log('warn', 'headed mode requested without DISPLAY; auto-falling back to virtual display', {

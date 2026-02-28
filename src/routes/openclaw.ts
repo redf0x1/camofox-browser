@@ -24,17 +24,17 @@ import {
 	withUserLimit,
 } from '../services/session';
 import {
+	annotateAriaYamlWithRefs,
 	buildRefs,
 	createTabState,
+	getAriaSnapshot,
 	refToLocator,
 	safePageClose,
-	snapshotTab,
 	smartFill,
 	validateUrl,
 	withTabLock,
 	withTimeout,
 } from '../services/tab';
-import { recordNavFailure, recordNavSuccess } from '../services/health';
 
 const CONFIG = loadConfig();
 
@@ -176,14 +176,7 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 					await tabState.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 					tabState.visitedUrls.add(url);
 					tabState.refs = await buildRefs(tabState.page);
-					tabState.lastSnapshot = null;
-					recordNavSuccess();
-					return {
-						ok: true,
-						targetId,
-						url: tabState.page.url(),
-						refsAvailable: tabState.refs.size > 0,
-					};
+					return { ok: true, targetId, url: tabState.page.url() };
 				}),
 				CONFIG.handlerTimeoutMs,
 				'openclaw-navigate',
@@ -192,7 +185,6 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 
 		return res.json(result);
 	} catch (err) {
-		recordNavFailure();
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'openclaw navigate failed', { reqId: req.reqId, error: message });
 		return res.status(500).json({ error: safeError(err) });
@@ -200,10 +192,9 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 });
 
 // GET /snapshot - Snapshot (OpenClaw format with query params)
-router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetId?: string; userId?: unknown; format?: string; offset?: unknown }>, res: Response) => {
+router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetId?: string; userId?: unknown; format?: string }>, res: Response) => {
 	try {
 		const { targetId, userId } = req.query;
-		const offset = parseInt(req.query.offset as string) || 0;
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
 		}
@@ -216,7 +207,16 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 		const { tabState } = found;
 		tabState.toolCalls++;
 
-		const result = await withTimeout(snapshotTab(tabState, offset), CONFIG.handlerTimeoutMs, 'openclaw-snapshot');
+		const result = await withTimeout(
+			(async () => {
+				tabState.refs = await buildRefs(tabState.page);
+				const ariaYaml = await getAriaSnapshot(tabState.page);
+				const annotatedYaml = annotateAriaYamlWithRefs(ariaYaml, tabState.refs);
+				return { url: tabState.page.url(), snapshot: annotatedYaml, refsCount: tabState.refs.size };
+			})(),
+			CONFIG.handlerTimeoutMs,
+			'openclaw-snapshot',
+		);
 
 		return res.json({
 			ok: true,
@@ -225,10 +225,6 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 			url: result.url,
 			snapshot: result.snapshot,
 			refsCount: result.refsCount,
-			truncated: result.truncated,
-			totalChars: result.totalChars,
-			hasMore: result.hasMore,
-			nextOffset: result.nextOffset,
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -329,12 +325,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					};
 
 					if (ref) {
-						let locator = refToLocator(tabState.page, ref, tabState.refs);
-						if (!locator && tabState.refs.size === 0) {
-							log('info', 'auto-refreshing stale refs before click', { ref });
-							tabState.refs = await buildRefs(tabState.page);
-							locator = refToLocator(tabState.page, ref, tabState.refs);
-						}
+						const locator = refToLocator(tabState.page, ref, tabState.refs);
 						if (!locator) throw new Error(`Unknown ref: ${ref}`);
 						await doClick(locator);
 					} else {
@@ -343,13 +334,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 
 					await tabState.page.waitForTimeout(500);
 					tabState.refs = await buildRefs(tabState.page);
-					tabState.lastSnapshot = null;
-					return {
-						ok: true,
-						targetId,
-						url: tabState.page.url(),
-						refsAvailable: tabState.refs.size > 0,
-					};
+					return { ok: true, targetId, url: tabState.page.url() };
 				}
 
 				case 'type': {

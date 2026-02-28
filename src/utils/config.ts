@@ -38,6 +38,7 @@ export interface ServerEnv {
   CAMOFOX_FAILURE_THRESHOLD?: string;
   CAMOFOX_YT_DLP_TIMEOUT_MS?: string;
   CAMOFOX_YT_BROWSER_TIMEOUT_MS?: string;
+  CAMOFOX_VNC_RESOLUTION?: string;
   CAMOFOX_HEADLESS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
@@ -68,6 +69,7 @@ export interface AppConfig {
   failureThreshold: number;
   ytDlpTimeoutMs: number;
   ytBrowserTimeoutMs: number;
+  vncResolution: string;
   headless: boolean | 'virtual';
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
@@ -97,6 +99,7 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_FAILURE_THRESHOLD?: string;
   CAMOFOX_YT_DLP_TIMEOUT_MS?: string;
   CAMOFOX_YT_BROWSER_TIMEOUT_MS?: string;
+  CAMOFOX_VNC_RESOLUTION?: string;
   CAMOFOX_HEADLESS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
@@ -157,6 +160,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const failureThreshold = parsePositiveIntOrDefault(env.CAMOFOX_FAILURE_THRESHOLD, 3);
   const ytDlpTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_YT_DLP_TIMEOUT_MS, 30000);
   const ytBrowserTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_YT_BROWSER_TIMEOUT_MS, 25000);
+  const vncResolution = env.CAMOFOX_VNC_RESOLUTION || '1920x1080x24';
   const headless = env.CAMOFOX_HEADLESS === 'false' || env.CAMOFOX_HEADLESS === '0'
     ? false
     : env.CAMOFOX_HEADLESS === 'virtual'
@@ -192,6 +196,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     failureThreshold,
     ytDlpTimeoutMs,
     ytBrowserTimeoutMs,
+    vncResolution,
     headless,
     proxy: {
       host: env.PROXY_HOST || '',
@@ -222,10 +227,11 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_FAILURE_THRESHOLD: env.CAMOFOX_FAILURE_THRESHOLD,
       CAMOFOX_YT_DLP_TIMEOUT_MS: env.CAMOFOX_YT_DLP_TIMEOUT_MS,
       CAMOFOX_YT_BROWSER_TIMEOUT_MS: env.CAMOFOX_YT_BROWSER_TIMEOUT_MS,
+      CAMOFOX_VNC_RESOLUTION: env.CAMOFOX_VNC_RESOLUTION,
       CAMOFOX_HEADLESS: env.CAMOFOX_HEADLESS,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
-      PROXY_USERNAME: env.PROXY_USERNAME,
+      PROXY_USERNAME: env.PROXY_USENERNAME,
       PROXY_PASSWORD: env.PROXY_PASSWORD,
     },
   };

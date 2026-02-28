@@ -3,8 +3,6 @@ import type { Locator, Page } from 'playwright-core';
 import { expandMacro } from '../utils/macros';
 import type { EvaluateResult, RefInfo, ScrollPosition, TabState, WaitForPageReadyOptions } from '../types';
 import { log } from '../middleware/logging';
-import { loadConfig } from '../utils/config';
-import { windowSnapshot, type WindowSnapshotResult } from '../utils/snapshot';
 
 const ALLOWED_URL_SCHEMES: ReadonlyArray<'http:' | 'https:'> = ['http:', 'https:'];
 
@@ -33,7 +31,6 @@ const MAX_SNAPSHOT_NODES = 500;
 const MAX_EVAL_TIMEOUT = 30000;
 const DEFAULT_EVAL_TIMEOUT = 5000;
 const MAX_RESULT_SIZE = 1048576; // 1MB
-const CONFIG = loadConfig();
 
 // Per-tab locks to serialize operations on the same tab
 // tabId -> Promise (the currently executing operation)
@@ -63,17 +60,9 @@ export async function withTabLock<T>(tabId: string, operation: () => Promise<T>)
 	const pending = tabLocks.get(tabId);
 	if (pending) {
 		try {
-			await Promise.race([
-				pending,
-				new Promise<never>((_resolve, reject) => {
-					setTimeout(() => reject(new Error('Tab lock timeout')), CONFIG.tabLockTimeoutMs);
-				}),
-			]);
-		} catch (err) {
-			if (err instanceof Error && err.message === 'Tab lock timeout') {
-				log('warn', 'tab lock timeout, proceeding', { tabId, timeoutMs: CONFIG.tabLockTimeoutMs });
-			}
-			// Previous operation failed or timed out, continue anyway
+			await pending;
+		} catch {
+			// Previous operation failed, continue anyway
 		}
 	}
 
@@ -276,72 +265,21 @@ export async function dismissConsentDialogs(page: Page): Promise<void> {
 
 export async function buildRefs(page: Page): Promise<Map<string, RefInfo>> {
 	const refs = new Map<string, RefInfo>();
-	const timeoutMs = CONFIG.buildRefsTimeoutMs;
-	const start = Date.now();
 
 	if (!page || page.isClosed()) {
 		log('warn', 'buildRefs: page closed or invalid');
 		return refs;
 	}
 
-	try {
-		return await Promise.race([
-			buildRefsInner(page, refs, start, timeoutMs),
-			new Promise<Map<string, RefInfo>>((_resolve, reject) => {
-				setTimeout(() => reject(new Error('buildRefs_timeout')), timeoutMs);
-			}),
-		]);
-	} catch (err) {
-		if (err instanceof Error && err.message === 'buildRefs_timeout') {
-			log('warn', 'buildRefs: total timeout exceeded', {
-				elapsedMs: Date.now() - start,
-				timeoutMs,
-				refsCount: refs.size,
-			});
-			return refs;
-		}
-		throw err;
-	}
-}
-
-async function buildRefsInner(
-	page: Page,
-	refs: Map<string, RefInfo>,
-	start: number,
-	timeoutMs: number,
-): Promise<Map<string, RefInfo>> {
 	await waitForPageReady(page, { waitForNetwork: false });
 
-	let remaining = timeoutMs - (Date.now() - start);
-	if (remaining < 2000) {
-		log('warn', 'buildRefs: insufficient time budget before ariaSnapshot', { remainingMs: remaining, timeoutMs });
-		return refs;
-	}
-
 	let ariaYaml: string | null;
-	const firstSnapshotTimeout = Math.max(1000, Math.min(remaining - 1000, 5000));
-
 	try {
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: firstSnapshotTimeout });
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
 	} catch {
 		log('warn', 'ariaSnapshot failed, retrying');
-		remaining = timeoutMs - (Date.now() - start);
-		if (remaining < 2000) {
-			log('warn', 'buildRefs: insufficient time budget before ariaSnapshot retry', { remainingMs: remaining, timeoutMs });
-			return refs;
-		}
-
-		const loadStateTimeout = Math.max(1000, Math.min(remaining - 1000, 5000));
-		await page.waitForLoadState('load', { timeout: loadStateTimeout }).catch(() => {});
-
-		remaining = timeoutMs - (Date.now() - start);
-		if (remaining < 2000) {
-			log('warn', 'buildRefs: insufficient time budget after retry prep', { remainingMs: remaining, timeoutMs });
-			return refs;
-		}
-
-		const retrySnapshotTimeout = Math.max(1000, Math.min(remaining - 1000, 5000));
-		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: retrySnapshotTimeout });
+		await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
+		ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 10000 });
 	}
 
 	if (!ariaYaml) {
@@ -401,15 +339,10 @@ export function createTabState(page: Page): TabState {
 		refs: new Map(),
 		visitedUrls: new Set(),
 		toolCalls: 0,
-		lastSnapshot: null,
 	};
 }
 
-export async function navigateTab(
-	tabId: string,
-	tabState: TabState,
-	params: { url?: string; macro?: string; query?: string },
-): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
+export async function navigateTab(tabId: string, tabState: TabState, params: { url?: string; macro?: string; query?: string }): Promise<{ ok: true; url: string }>{
 	const { url, macro, query } = params;
 	let targetUrl = url;
 	if (macro) {
@@ -431,69 +364,22 @@ export async function navigateTab(
 		await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 		tabState.visitedUrls.add(targetUrl);
 		tabState.refs = await buildRefs(tabState.page);
-		tabState.lastSnapshot = null;
-		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
+		return { ok: true as const, url: tabState.page.url() };
 	});
 }
 
-export async function snapshotTab(
-	tabState: TabState,
-	offset: number = 0,
-): Promise<{
-	url: string;
-	snapshot: string;
-	refsCount: number;
-	truncated: boolean;
-	totalChars: number;
-	hasMore?: boolean;
-	nextOffset?: number | null;
-}> {
-	const parsedOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
-
-	if (parsedOffset > 0 && tabState.lastSnapshot) {
-		const cachedWindow: WindowSnapshotResult = windowSnapshot(
-			tabState.lastSnapshot,
-			parsedOffset,
-			CONFIG.maxSnapshotChars,
-			CONFIG.snapshotTailChars,
-		);
-		return {
-			url: tabState.page.url(),
-			snapshot: cachedWindow.text,
-			refsCount: tabState.refs.size,
-			truncated: cachedWindow.truncated,
-			totalChars: cachedWindow.totalChars,
-			hasMore: cachedWindow.hasMore,
-			nextOffset: cachedWindow.nextOffset,
-		};
-	}
-
+export async function snapshotTab(tabState: TabState): Promise<{ url: string; snapshot: string; refsCount: number }>{
 	tabState.refs = await buildRefs(tabState.page);
 	const ariaYaml = await getAriaSnapshot(tabState.page);
 	const annotatedYaml = annotateAriaYamlWithRefs(ariaYaml, tabState.refs);
-	tabState.lastSnapshot = annotatedYaml;
-	const windowed: WindowSnapshotResult = windowSnapshot(
-		annotatedYaml,
-		parsedOffset,
-		CONFIG.maxSnapshotChars,
-		CONFIG.snapshotTailChars,
-	);
 	return {
 		url: tabState.page.url(),
-		snapshot: windowed.text,
+		snapshot: annotatedYaml,
 		refsCount: tabState.refs.size,
-		truncated: windowed.truncated,
-		totalChars: windowed.totalChars,
-		hasMore: windowed.hasMore,
-		nextOffset: windowed.nextOffset,
 	};
 }
 
-export async function clickTab(
-	tabId: string,
-	tabState: TabState,
-	params: { ref?: string; selector?: string },
-): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
+export async function clickTab(tabId: string, tabState: TabState, params: { ref?: string; selector?: string }): Promise<{ ok: true; url: string }>{
 	const { ref, selector } = params;
 	if (!ref && !selector) {
 		const err = new Error('ref or selector required');
@@ -534,7 +420,7 @@ export async function clickTab(
 						log('warn', 'force click failed, trying mouse sequence');
 						await dispatchMouseSequence(locator);
 					}
-				} else if (message.includes('not visible') || message.toLowerCase().includes('timeout')) {
+				} else if (message.includes('not visible') || message.includes('timeout')) {
 					log('warn', 'click timeout, trying mouse sequence');
 					await dispatchMouseSequence(locator);
 				} else {
@@ -544,12 +430,7 @@ export async function clickTab(
 		};
 
 		if (ref) {
-			let locator = refToLocator(tabState.page, ref, tabState.refs);
-			if (!locator && tabState.refs.size === 0) {
-				log('info', 'auto-refreshing stale refs before click', { ref });
-				tabState.refs = await buildRefs(tabState.page);
-				locator = refToLocator(tabState.page, ref, tabState.refs);
-			}
+			const locator = refToLocator(tabState.page, ref, tabState.refs);
 			if (!locator) {
 				const maxRef = tabState.refs.size > 0 ? `e${tabState.refs.size}` : 'none';
 				throw new Error(
@@ -563,11 +444,10 @@ export async function clickTab(
 
 		await tabState.page.waitForTimeout(500);
 		tabState.refs = await buildRefs(tabState.page);
-		tabState.lastSnapshot = null;
 
 		const newUrl = tabState.page.url();
 		tabState.visitedUrls.add(newUrl);
-		return { ok: true as const, url: newUrl, refsAvailable: tabState.refs.size > 0 };
+		return { ok: true as const, url: newUrl };
 	});
 }
 
@@ -780,30 +660,27 @@ export async function evaluateTab(
 	});
 }
 
-export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
+export async function backTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.goBack({ timeout: 10000 });
-		tabState.lastSnapshot = null;
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
+		return { ok: true as const, url: tabState.page.url() };
 	});
 }
 
-export async function forwardTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
+export async function forwardTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.goForward({ timeout: 10000 });
-		tabState.lastSnapshot = null;
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
+		return { ok: true as const, url: tabState.page.url() };
 	});
 }
 
-export async function refreshTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string; refsAvailable: boolean }>{
+export async function refreshTab(tabId: string, tabState: TabState): Promise<{ ok: true; url: string }>{
 	return withTabLock(tabId, async () => {
 		await tabState.page.reload({ timeout: 30000 });
-		tabState.lastSnapshot = null;
 		tabState.refs = await buildRefs(tabState.page);
-		return { ok: true as const, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 };
+		return { ok: true as const, url: tabState.page.url() };
 	});
 }
 

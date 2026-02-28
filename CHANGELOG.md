@@ -1,110 +1,11 @@
 # Changelog
 
-## [1.8.0] — 2025-07-15
-
-### Added
-- **noVNC browser viewer** — See the browser GUI through your web browser when in virtual/headed mode
-- **Auto VNC start/stop** — VNC automatically starts when toggling to virtual/headed mode and stops when switching back to headless
-- **`CAMOFOX_VNC_TIMEOUT_MS`** — Configurable VNC session timeout (default: 120000ms / 2 minutes)
-- **VNC URL in toggle-display response** — Response includes `vncUrl` field when VNC is active
-- **VNC lifecycle management** — Automatic cleanup on session delete, context close, and server shutdown
-
-## [1.7.1] — 2025-07-15
+## [1.8.1] — 2025-07-15
 
 ### Fixed
-- **Virtual display mode** — `headless: "virtual"` now correctly creates an Xvfb virtual display instead of passing string to browser launcher
-- **Headed mode in Docker** — `headless: false` auto-falls back to virtual display when no X display server is available
-- **Xvfb in Docker** — Added `xvfb` package to Docker image for virtual display support
-- **VirtualDisplay lifecycle** — Xvfb processes are properly cleaned up on context close
-
-## [1.7.0] — 2026-02-27
-
-### Added
-- **Display mode toggle** — New `POST /sessions/:userId/toggle-display` endpoint to switch browser between headless and headed mode at runtime. Useful for solving CAPTCHAs or debugging visual issues
-- **`CAMOFOX_HEADLESS` environment variable** — Configure default display mode: `true` (headless, default), `false` (headed — shows browser window), or `virtual` (Xvfb virtual display)
-- **Per-user display overrides** — Each user session can have its own display mode independent of the global default
-
-## [1.6.2] — 2026-02-27
-
-### Fixed
-- **Node.js engine requirement** — Updated `engines.node` from `>=18` to `>=22` to match actual runtime requirement (`camoufox-js` is ESM-only, requires Node 22+ for CJS interop)
-
-## [1.6.1] — 2026-02-27
-
-### Fixed
-- **YouTube transcript: yt-dlp updated to 2026.02.21** — Previous version (2025.02.19) had broken nsig extraction causing all subtitle downloads to fail
-- **YouTube transcript: narrowed subtitle language selection** — `en.*` wildcard pattern was matching auto-translated tracks, triggering YouTube 429 rate-limiting
-- **YouTube transcript: added `--js-runtimes node` flag** — yt-dlp 2026.x EJS system requires explicit JS runtime declaration
-- **YouTube transcript: added `--no-abort-on-error` flag** — Prevents yt-dlp from failing entirely when one subtitle track 429s
-- **Browser transcript fallback: added hard timeout** — `Promise.race` wrapper prevents indefinite Playwright Firefox hangs (known Playwright issue)
-- **Concurrency leak fix: `withUserLimit` operation timeout** — Added optional operation-level timeout to prevent permanently stuck concurrency slots
-- **Session cleanup: reset `userConcurrency` on session deletion** — `cleanupSessionsForUserId` now properly clears the concurrency tracking Map
-
-## [1.6.0] — 2026-02-27
-
-### Added
-- YouTube transcript extraction via `POST /youtube/transcript` — yt-dlp primary with browser fallback, supports multiple languages
-- Snapshot truncation/windowing for large pages — offset-based pagination with configurable max chars
-- Browser health tracking — `GET /health` returns 503 during recovery with `consecutiveFailures` and `activeOps` fields
-- `refsAvailable` flag in navigate and click responses indicating if element refs are ready
-- Auto-refresh stale refs when `refs.size === 0` during click operations
-- Plugin tools: `camofox_go_back`, `camofox_go_forward`, `camofox_refresh`
-- Plugin: `offset` parameter for `camofox_snapshot` tool with truncation metadata
-- 8 new environment variables: `CAMOFOX_MAX_SNAPSHOT_CHARS`, `CAMOFOX_SNAPSHOT_TAIL_CHARS`, `CAMOFOX_BUILDREFS_TIMEOUT_MS`, `CAMOFOX_TAB_LOCK_TIMEOUT_MS`, `CAMOFOX_HEALTH_PROBE_INTERVAL_MS`, `CAMOFOX_FAILURE_THRESHOLD`, `CAMOFOX_YT_DLP_TIMEOUT_MS`, `CAMOFOX_YT_BROWSER_TIMEOUT_MS`
-- Dockerfile: yt-dlp installation with pinned version
-
-### Fixed
-- Case-insensitive click timeout detection
-- Snapshot cache invalidation on back/forward/refresh navigation
-- OpenClaw stale refs handling
-- Health state `resetHealth()` properly resets `activeOps`
-- YouTube transcript: concurrency control, orphaned promise handling
-- Plugin navigation tools derive `userId` from context instead of explicit parameter
-
-## [1.5.2] — 2026-02-20
-### Improved
-- Download metadata now includes `contentUrl` for direct file retrieval by AI agents
-- Default download TTL increased from 30 minutes to 24 hours
-- Download registry persisted to disk (`registry.json`) — survives server restarts
-- TTL countdown starts from `completedAt` instead of `createdAt`
-- Orphaned download files automatically rebuilt into registry on startup
-- AGENTS.md: Added clear download workflow guide for AI agents
-### Fixed
-- `finalizeDownload` failure branch now persists registry state
-- Click handler download response now includes `contentUrl`
-- `buildContentUrl` exported and reused (DRY)
-
-## [1.5.1] - 2026-02-20
-
-### Fixed
-- Dockerfile: Added `VOLUME /home/node/.camofox` to make persistence intent explicit
-- fly.toml: Added `CAMOFOX_PROFILES_DIR`, `CAMOFOX_COOKIES_DIR`, `CAMOFOX_DOWNLOADS_DIR` env vars for Fly.io volume persistence
-
-### Added
-- docker-compose.yml for easy deployment with volume mount
-
-### Docs
-- Updated Docker examples in README.md and AGENTS.md with volume mount
-
-## [1.5.0] - 2026-02-20
-
-### Added
-- Download lifecycle management (register, list, get, delete, cleanup with TTL)
-- Scoped DOM resource extraction (images, links, media, documents from specific containers)
-- Batch download pipeline with concurrency control and semaphore
-- Blob URL resolution for Firefox (FileReader.readAsDataURL pattern)
-- Enhanced `GET /links` with scope, extension, and downloadOnly filters
-- 8 new REST endpoints for downloads and resource management
-- Per-user download cap (500 entries) with LRU eviction
-- Stream error handling on download content delivery
-- Data URI support (both base64 and URL-encoded)
-- Comprehensive unit tests for download helpers, registry, and batch downloader
-
-### Fixed
-- Resolve-blobs endpoint now capped at 25 URLs with parallel resolution
-- Batch-download timeout increased to 5 minutes
-- Cleanup interval skips pending downloads
-- Error responses standardized with safeError() across all new endpoints
+- **noVNC display scaling** — Removed x11vnc `-ncache` flag that caused 10x framebuffer height in noVNC viewer
+- **Custom Xvfb resolution** — Replaced camoufox VirtualDisplay (1x1px) with custom Xvfb spawner at 1920x1080 resolution
+- **`CAMOFOX_VNC_RESOLUTION`** — Configurable virtual display resolution (default: 1920x1080x24)
 
 ## [1.4.0] - 2026-02-18
 

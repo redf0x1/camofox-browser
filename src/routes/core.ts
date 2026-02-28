@@ -8,8 +8,7 @@ import { log } from '../middleware/logging';
 import { isAuthorizedWithApiKey } from '../middleware/auth';
 import { loadConfig } from '../utils/config';
 import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
-import { contextPool, getDisplayForUser } from '../services/context-pool';
-import { startVnc, stopVnc } from '../services/vnc';
+import { contextPool } from '../services/context-pool';
 import {
 	MAX_TABS_PER_SESSION,
 	findTabById,
@@ -56,8 +55,6 @@ import {
 } from '../services/download';
 import { extractResources, resolveBlob } from '../services/resource-extractor';
 import { batchDownload } from '../services/batch-downloader';
-import { getHealthState, recordNavFailure, recordNavSuccess } from '../services/health';
-import { browserTranscript, extractVideoId, hasYtDlp, INTERNAL_TRANSCRIPT_USER_ID, ytDlpTranscript } from '../services/youtube';
 
 import type { CookieInput, ContextOverrides } from '../types';
 
@@ -179,11 +176,6 @@ router.get(
 // Health check
 router.get('/health', async (_req: Request, res: Response) => {
 	try {
-		const health = getHealthState();
-		if (health.isRecovering) {
-			return res.status(503).json({ ok: false, engine: 'camoufox', recovering: true });
-		}
-
 		const activeUserIds = contextPool.listActiveUserIds();
 		let profileDirsTotal = 0;
 		try {
@@ -200,8 +192,6 @@ router.get('/health', async (_req: Request, res: Response) => {
 			running: true,
 			engine: 'camoufox',
 			browserConnected: activeUserIds.length > 0,
-			consecutiveFailures: health.consecutiveNavFailures,
-			activeOps: health.activeOps,
 			poolSize: contextPool.size(),
 			activeUserIds,
 			profileDirsTotal,
@@ -365,12 +355,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 					await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 					tabState.visitedUrls.add(targetUrl);
 					tabState.refs = await buildRefs(tabState.page);
-					tabState.lastSnapshot = null;
-					recordNavSuccess();
-					return {
-						status: 200 as const,
-						body: { ok: true, url: tabState.page.url(), refsAvailable: tabState.refs.size > 0 },
-					};
+					return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
 				}),
 				CONFIG.handlerTimeoutMs,
 				'navigate',
@@ -382,14 +367,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 		log('info', 'navigated', { reqId: req.reqId, tabId, url: result.body.url });
 		return res.json(result.body);
 	} catch (err) {
-		const shouldWarn = recordNavFailure();
 		const message = err instanceof Error ? err.message : String(err);
-		if (shouldWarn) {
-			log('error', 'consecutive nav failures exceeded threshold', {
-				tabId,
-				failureThreshold: CONFIG.failureThreshold,
-			});
-		}
 		log('error', 'navigate failed', { reqId: req.reqId, tabId, error: message });
 		const status = err instanceof Error && err.message?.startsWith('Blocked URL scheme') ? 400 : 500;
 		return res.status(status).json({ error: safeError(err) });
@@ -397,10 +375,9 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 });
 
 // Snapshot
-router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown; offset?: unknown }>, res: Response) => {
+router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown }>, res: Response) => {
 	try {
 		const userId = req.query.userId;
-		const offset = parseInt(req.query.offset as string) || 0;
 		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const tabId = req.params.tabId;
 		const found = findTabById(tabId, userId);
@@ -409,7 +386,7 @@ router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unkno
 		const { tabState } = found;
 		tabState.toolCalls++;
 		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
-			withTimeout(snapshotTab(tabState, offset), CONFIG.handlerTimeoutMs, 'snapshot'),
+			withTimeout(snapshotTab(tabState), CONFIG.handlerTimeoutMs, 'snapshot'),
 		);
 		log('info', 'snapshot', {
 			reqId: req.reqId,
@@ -464,7 +441,6 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 				filename: d.suggestedFilename,
 				status: d.status,
 				size: d.size,
-				contentUrl: d.contentUrl,
 			}));
 		}
 		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });
@@ -800,60 +776,6 @@ router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res:
 	}
 });
 
-// Toggle display mode (headless/headed/virtual) for a user session
-router.post(
-	'/sessions/:userId/toggle-display',
-	async (
-		req: Request<{ userId: string }, unknown, { headless?: unknown }>,
-		res: Response,
-	) => {
-		try {
-			const userId = normalizeUserId(req.params.userId);
-			const { headless } = req.body ?? {};
-
-			if (typeof headless !== 'boolean' && headless !== 'virtual') {
-				return res.status(400).json({
-					error: 'headless must be a boolean or "virtual"',
-				});
-			}
-
-			// Existing tabs become invalid after context restart.
-			await closeSessionsForUser(userId);
-			await contextPool.restartContext(userId, headless);
-
-			let vncUrl: string | undefined;
-			if (headless === true) {
-				await stopVnc(userId).catch(() => {});
-			} else {
-				const displayNum = getDisplayForUser(userId);
-				if (displayNum) {
-					try {
-						const vnc = await startVnc(userId, displayNum);
-						vncUrl = vnc.vncUrl;
-					} catch (vncErr) {
-						const vncMessage = vncErr instanceof Error ? vncErr.message : String(vncErr);
-						log('warn', 'vnc start failed after display toggle', { userId, error: vncMessage, displayNum });
-					}
-				}
-			}
-
-			const modeLabel = headless === false ? 'headed mode' : headless === 'virtual' ? 'virtual display mode' : 'headless mode';
-			return res.json({
-				ok: true,
-				headless,
-				...(vncUrl
-					? { vncUrl, message: 'Browser visible via VNC' }
-					: { message: `Browser restarted in ${modeLabel}. Previous tabs invalidated — create new tabs.` }),
-				userId,
-			});
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			log('error', 'toggle display failed', { error: message });
-			return res.status(500).json({ error: safeError(err) });
-		}
-	},
-);
-
 // Downloads: list by tab
 router.get('/tabs/:tabId/downloads', async (req, res) => {
 	try {
@@ -1062,75 +984,6 @@ router.post('/tabs/:tabId/resolve-blobs', async (req, res) => {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'resolve blobs failed', { error: message });
 		res.status(500).json({ ok: false, error: safeError(err) });
-	}
-});
-
-// YouTube transcript extraction (yt-dlp primary, browser fallback)
-router.post('/youtube/transcript', async (req: Request<unknown, unknown, { url?: unknown; languages?: unknown; userId?: unknown }>, res: Response) => {
-	const reqId = req.reqId || crypto.randomUUID().slice(0, 8);
-	const { url, languages } = req.body;
-	const userId = typeof req.body.userId === 'string' && req.body.userId.trim().length > 0
-		? req.body.userId
-		: INTERNAL_TRANSCRIPT_USER_ID;
-
-	if (!url || typeof url !== 'string') {
-		return res.status(400).json({ ok: false, error: 'url is required' });
-	}
-
-	const videoId = extractVideoId(url);
-	if (!videoId) {
-		return res.status(400).json({ ok: false, error: 'Invalid YouTube URL' });
-	}
-
-	const preferredLanguages = Array.isArray(languages)
-		? languages.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-		: [];
-	const lang = preferredLanguages[0] || 'en';
-	const transcriptOpTimeoutMs = Math.max(CONFIG.ytDlpTimeoutMs, CONFIG.ytBrowserTimeoutMs) + 5000;
-
-	try {
-		const result = await withUserLimit(userId, CONFIG.maxConcurrentPerUser, async () => {
-			if (hasYtDlp()) {
-				try {
-					return await ytDlpTranscript(reqId, url, videoId, lang, CONFIG.ytDlpTimeoutMs);
-				} catch (err: any) {
-					const stderr = err?.stderr ? ` stderr: ${String(err.stderr).slice(0, 200)}` : '';
-					const message = err instanceof Error ? err.message : String(err);
-					log('warn', 'yt-dlp transcript failed, using browser fallback', {
-						reqId,
-						videoId,
-						url,
-						error: `${message}${stderr}`,
-					});
-					return await browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs);
-				}
-			}
-			return await browserTranscript(reqId, url, videoId, lang, contextPool, CONFIG.ytBrowserTimeoutMs);
-		}, transcriptOpTimeoutMs);
-
-		log('info', 'youtube transcript extracted', {
-			reqId,
-			videoId,
-			url,
-			language: result.language,
-			words: result.total_words,
-		});
-		return res.json(result);
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		log('error', 'youtube transcript failed', {
-			reqId,
-			videoId,
-			url,
-			error: message,
-		});
-		return res.status(500).json({
-			status: 'error',
-			code: 500,
-			message: safeError(err),
-			video_url: url,
-			video_id: videoId,
-		});
 	}
 });
 
