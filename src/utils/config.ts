@@ -231,7 +231,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_HEADLESS: env.CAMOFOX_HEADLESS,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
-      PROXY_USERNAME: env.PROXY_USENERNAME,
+      PROXY_USERNAME: env.PROXY_USERNAME,
       PROXY_PASSWORD: env.PROXY_PASSWORD,
     },
   };
