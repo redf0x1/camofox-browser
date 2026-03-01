@@ -232,6 +232,10 @@ The VNC session auto-terminates after 2 minutes (configurable via `CAMOFOX_VNC_T
 ### Evaluate JavaScript
 Execute a JavaScript expression in the page context and return the JSON-serializable result.
 
+Auth: required only when `CAMOFOX_API_KEY` is set on the server; otherwise no auth is required.
+
+Note: async expressions must be wrapped in an async IIFE (for example, `(async () => { ... })()`). Top-level `await` is not supported.
+
 ```bash
 POST /tabs/:tabId/evaluate
 {"userId": "agent1", "expression": "document.title"}
@@ -241,9 +245,13 @@ Returns: `{"ok": true, "result": "Page Title", "resultType": "string", "truncate
 ### Evaluate JavaScript (Extended)
 Execute a long-running JavaScript expression (up to 300s timeout). Conditionally API-key protected. Rate limited.
 
+Auth: required only when `CAMOFOX_API_KEY` is set on the server; otherwise no auth is required.
+
+Note: async expressions must be wrapped in an async IIFE (for example, `(async () => { ... })()`). Top-level `await` is not supported.
+
 ```bash
 POST /tabs/:tabId/evaluate-extended
-{"userId": "agent1", "expression": "await fetch('/api').then(r => r.json())", "timeout": 60000}
+{"userId": "agent1", "expression": "(async () => { const response = await fetch('/api/data'); return await response.json(); })()", "timeout": 60000}
 ```
 Returns: `{"ok": true, "result": {...}, "resultType": "object", "truncated": false}`
 

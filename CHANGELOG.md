@@ -14,6 +14,7 @@
 
 ### Changed
 - Refactored `evaluateTab()` to share internal logic via `_evaluateInternal()` — no behavior changes to existing `/evaluate` endpoint
+- Documentation clarification: async expressions for `/evaluate` and `/evaluate-extended` must be wrapped in an async IIFE (`(async () => { ... })()`), since top-level `await` is not supported by `page.evaluate()`
 
 ### Fixed
 - Restored missing `POST /sessions/:userId/toggle-display` route that was causing `Cannot POST` 404 errors from MCP toggle_display tool
