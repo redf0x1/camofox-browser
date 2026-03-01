@@ -6,9 +6,11 @@ import express, { Router, type Request, type Response } from 'express';
 import { safeError } from '../middleware/errors';
 import { log } from '../middleware/logging';
 import { isAuthorizedWithApiKey } from '../middleware/auth';
+import { checkRateLimit } from '../middleware/rate-limit';
 import { loadConfig } from '../utils/config';
 import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
-import { contextPool } from '../services/context-pool';
+import { contextPool, getDisplayForUser } from '../services/context-pool';
+import { startVnc, stopVnc } from '../services/vnc';
 import {
 	MAX_TABS_PER_SESSION,
 	findTabById,
@@ -29,6 +31,7 @@ import {
 	clickTab,
 	createTabState,
 	evaluateTab,
+	evaluateTabExtended,
 	forwardTab,
 	getLinks,
 	pressTab,
@@ -584,6 +587,91 @@ router.post(
 	},
 );
 
+// Evaluate JS extended (API key optional)
+router.post(
+	'/tabs/:tabId/evaluate-extended',
+	express.json({ limit: '64kb' }),
+	async (req: Request<{ tabId: string }, unknown, { userId?: unknown; expression?: unknown; timeout?: unknown }>, res: Response) => {
+		const tabId = req.params.tabId;
+		try {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+				return res.status(403).json({ ok: false, error: 'Forbidden' });
+			}
+
+			const userId = req.body?.userId;
+			if (!userId || typeof userId !== 'string') {
+				return res.status(400).json({ ok: false, error: 'userId is required' });
+			}
+
+			const normalizedRateLimitUserId = String(userId).toLowerCase().trim();
+
+			const rateCheck = checkRateLimit(
+				normalizedRateLimitUserId,
+				CONFIG.evalExtendedRateLimitMax,
+				CONFIG.evalExtendedRateLimitWindowMs,
+			);
+			if (!rateCheck.allowed) {
+				res.set('Retry-After', String(Math.ceil((rateCheck.retryAfterMs || 60000) / 1000)));
+				return res
+					.status(429)
+					.json({ ok: false, error: 'Rate limit exceeded', retryAfterMs: rateCheck.retryAfterMs });
+			}
+
+			const { expression, timeout } = req.body;
+			if (!expression || typeof expression !== 'string') {
+				return res.status(400).json({ ok: false, error: 'expression is required and must be a string' });
+			}
+			if (Buffer.byteLength(expression, 'utf8') > 65536) {
+				return res.status(400).json({ ok: false, error: 'expression exceeds 64KB limit' });
+			}
+
+			if (timeout !== undefined && (typeof timeout !== 'number' || timeout < 100 || timeout > 300000)) {
+				return res.status(400).json({ ok: false, error: 'timeout must be a number between 100 and 300000' });
+			}
+
+			const found = findTabById(tabId, userId);
+			if (!found) return res.status(404).json({ ok: false, error: 'Tab not found' });
+			const { tabState } = found;
+			tabState.toolCalls++;
+
+			const effectiveTimeout = Math.min(Math.max((timeout as number | undefined) ?? 30000, 100), 300000);
+			const outerTimeout = effectiveTimeout + 10000;
+
+			const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, async () =>
+				withTimeout(
+					evaluateTabExtended(tabId, tabState, { expression, timeout: effectiveTimeout }),
+					outerTimeout,
+					`Evaluate-extended timed out after ${outerTimeout}ms`,
+				),
+			);
+
+			if (result.ok) {
+				return res.json(result);
+			}
+
+			if (result.errorType === 'timeout') {
+				return res.status(408).json(result);
+			}
+
+			return res.status(500).json(result);
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'evaluate-extended failed', { reqId: req.reqId, tabId, error: message });
+
+			if (message.includes('timed out') || message.includes('Timeout')) {
+				return res.status(408).json({ ok: false, error: message, errorType: 'timeout' });
+			}
+			if (message.includes('concurrency limit') || message.includes('Concurrency limit')) {
+				return res
+					.status(429)
+					.json({ ok: false, error: 'Concurrent operation limit reached, try again later' });
+			}
+
+			return res.status(500).json({ ok: false, error: safeError(err), errorType: 'js_error' });
+		}
+	},
+);
+
 // Back
 router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown, { userId?: unknown }>, res: Response) => {
 	const tabId = req.params.tabId;
@@ -775,6 +863,60 @@ router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res:
 		return res.status(500).json({ error: safeError(err) });
 	}
 });
+
+// Toggle display mode (headless/headed/virtual) for a user session
+router.post(
+	'/sessions/:userId/toggle-display',
+	async (
+		req: Request<{ userId: string }, unknown, { headless?: unknown }>,
+		res: Response,
+	) => {
+		try {
+			const userId = normalizeUserId(req.params.userId);
+			const { headless } = req.body ?? {};
+
+			if (typeof headless !== 'boolean' && headless !== 'virtual') {
+				return res.status(400).json({
+					error: 'headless must be a boolean or "virtual"',
+				});
+			}
+
+			// Existing tabs become invalid after context restart.
+			await closeSessionsForUser(userId);
+			await contextPool.restartContext(userId, headless);
+
+			let vncUrl: string | undefined;
+			if (headless === true) {
+				await stopVnc(userId).catch(() => {});
+			} else {
+				const displayNum = getDisplayForUser(userId);
+				if (displayNum) {
+					try {
+						const vnc = await startVnc(userId, displayNum);
+						vncUrl = vnc.vncUrl;
+					} catch (vncErr) {
+						const vncMessage = vncErr instanceof Error ? vncErr.message : String(vncErr);
+						log('warn', 'vnc start failed after display toggle', { userId, error: vncMessage, displayNum });
+					}
+				}
+			}
+
+			const modeLabel = headless === false ? 'headed mode' : headless === 'virtual' ? 'virtual display mode' : 'headless mode';
+			return res.json({
+				ok: true,
+				headless,
+				...(vncUrl
+					? { vncUrl, message: 'Browser visible via VNC' }
+					: { message: `Browser restarted in ${modeLabel}. Previous tabs invalidated — create new tabs.` }),
+				userId,
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'toggle display failed', { error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
 
 // Downloads: list by tab
 router.get('/tabs/:tabId/downloads', async (req, res) => {

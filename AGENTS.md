@@ -88,7 +88,7 @@ POST /tabs/:tabId/scroll-element
 ```
 Returns: `{"ok": true, "scrollPosition": {"scrollTop": 400, "scrollLeft": 0, "scrollHeight": 1200, "clientHeight": 600, "scrollWidth": 800, "clientWidth": 800}}`
 
-### Evaluate JavaScript (API key required)
+### Evaluate JavaScript (conditional API key auth)
 Execute a JavaScript expression in the page context and return the JSON-serializable result.
 
 Parameters:
@@ -96,7 +96,7 @@ Parameters:
 - `expression` (string, required) — JavaScript expression (max 64KB)
 - `timeout` (number, optional) — Milliseconds (min 100, max 30000, default 5000)
 
-Auth: required — `Authorization: Bearer $CAMOFOX_API_KEY` (server must have `CAMOFOX_API_KEY` set)
+Auth: required only when `CAMOFOX_API_KEY` is set on the server; otherwise no auth is required
 
 ```bash
 POST /tabs/:tabId/evaluate
@@ -104,6 +104,27 @@ Authorization: Bearer $CAMOFOX_API_KEY
 {"userId": "agent1", "expression": "({url: window.location.href, links: document.querySelectorAll('a').length})", "timeout": 5000}
 ```
 Returns (success): `{"ok": true, "result": {"url": "https://...", "links": 123}, "resultType": "object", "truncated": false}`
+
+Returns (error): `{"ok": false, "error": "...", "errorType": "js_error" | "timeout"}`
+
+### Evaluate JavaScript (Extended)
+Execute a long-running JavaScript expression (up to 300s timeout). Conditionally API-key protected. Rate limited.
+
+Parameters:
+- `userId` (string) — Session owner
+- `expression` (string, required) — JavaScript expression (max 64KB)
+- `timeout` (number, optional) — Milliseconds (min 100, max 300000, default 30000)
+
+Auth: required only when `CAMOFOX_API_KEY` is set on the server; otherwise no auth is required
+
+Rate limit: 20 requests per minute per userId (configurable)
+
+```bash
+POST /tabs/:tabId/evaluate-extended
+Authorization: Bearer $CAMOFOX_API_KEY
+{"userId": "agent1", "expression": "await new Promise(r => setTimeout(r, 60000)).then(() => 'done')", "timeout": 120000}
+```
+Returns (success): `{"ok": true, "result": "done", "resultType": "string", "truncated": false}`
 
 Returns (error): `{"ok": false, "error": "...", "errorType": "js_error" | "timeout"}`
 
@@ -185,6 +206,8 @@ docker run -p 9377:9377 camofox-browser
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
 | `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
+| `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX` | `20` | Max evaluate-extended requests per user per window |
+| `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window duration in ms |
 
 ## Key Files
 

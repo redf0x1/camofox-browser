@@ -40,6 +40,8 @@ export interface ServerEnv {
   CAMOFOX_YT_BROWSER_TIMEOUT_MS?: string;
   CAMOFOX_VNC_RESOLUTION?: string;
   CAMOFOX_HEADLESS?: string;
+  CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX?: string;
+  CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -71,6 +73,8 @@ export interface AppConfig {
   ytBrowserTimeoutMs: number;
   vncResolution: string;
   headless: boolean | 'virtual';
+  evalExtendedRateLimitMax: number;
+  evalExtendedRateLimitWindowMs: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
 }
@@ -101,6 +105,8 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_YT_BROWSER_TIMEOUT_MS?: string;
   CAMOFOX_VNC_RESOLUTION?: string;
   CAMOFOX_HEADLESS?: string;
+  CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX?: string;
+  CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -166,6 +172,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     : env.CAMOFOX_HEADLESS === 'virtual'
       ? 'virtual'
       : true;
+  const evalExtendedRateLimitMax = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX, 20);
+  const evalExtendedRateLimitWindowMs = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS, 60000);
 
   const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
@@ -198,6 +206,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     ytBrowserTimeoutMs,
     vncResolution,
     headless,
+    evalExtendedRateLimitMax,
+    evalExtendedRateLimitWindowMs,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',
@@ -229,6 +239,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_YT_BROWSER_TIMEOUT_MS: env.CAMOFOX_YT_BROWSER_TIMEOUT_MS,
       CAMOFOX_VNC_RESOLUTION: env.CAMOFOX_VNC_RESOLUTION,
       CAMOFOX_HEADLESS: env.CAMOFOX_HEADLESS,
+      CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX,
+      CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,

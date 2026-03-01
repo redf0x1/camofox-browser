@@ -30,7 +30,14 @@ const MAX_SNAPSHOT_NODES = 500;
 
 const MAX_EVAL_TIMEOUT = 30000;
 const DEFAULT_EVAL_TIMEOUT = 5000;
+const MAX_EVAL_EXTENDED_TIMEOUT = 300000;
+const DEFAULT_EVAL_EXTENDED_TIMEOUT = 30000;
 const MAX_RESULT_SIZE = 1048576; // 1MB
+
+interface EvaluateConfig {
+	maxTimeout: number;
+	defaultTimeout: number;
+}
 
 // Per-tab locks to serialize operations on the same tab
 // tabId -> Promise (the currently executing operation)
@@ -602,9 +609,21 @@ export async function evaluateTab(
 	tabState: TabState,
 	params: { expression: string; timeout?: number },
 ): Promise<EvaluateResult> {
+	return _evaluateInternal(tabId, tabState, params, {
+		maxTimeout: MAX_EVAL_TIMEOUT,
+		defaultTimeout: DEFAULT_EVAL_TIMEOUT,
+	});
+}
+
+async function _evaluateInternal(
+	tabId: string,
+	tabState: TabState,
+	params: { expression: string; timeout?: number },
+	config: EvaluateConfig,
+): Promise<EvaluateResult> {
 	return withTabLock(tabId, async () => {
 		const page = tabState.page;
-		const timeout = Math.min(Math.max(params.timeout ?? DEFAULT_EVAL_TIMEOUT, 100), MAX_EVAL_TIMEOUT);
+		const timeout = Math.min(Math.max(params.timeout ?? config.defaultTimeout, 100), config.maxTimeout);
 
 		let timeoutId: ReturnType<typeof setTimeout> | undefined;
 		const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -657,6 +676,17 @@ export async function evaluateTab(
 		} finally {
 			if (timeoutId) clearTimeout(timeoutId);
 		}
+	});
+}
+
+export async function evaluateTabExtended(
+	tabId: string,
+	tabState: TabState,
+	params: { expression: string; timeout?: number },
+): Promise<EvaluateResult> {
+	return _evaluateInternal(tabId, tabState, params, {
+		maxTimeout: MAX_EVAL_EXTENDED_TIMEOUT,
+		defaultTimeout: DEFAULT_EVAL_EXTENDED_TIMEOUT,
 	});
 }
 
