@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.9.0] - 2026-03-01
+
+### Added
+- `POST /tabs/:tabId/evaluate-extended` — Execute JavaScript with extended timeout up to 300 seconds
+	- Configurable timeout (100ms to 300s, default 30s)
+	- Conditional API key authentication (when `CAMOFOX_API_KEY` is set)
+	- Per-user fixed-window rate limiting (default: 20 req/minute)
+	- Environment variables: `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX`, `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS`
+- In-memory rate limiter middleware (`src/middleware/rate-limit.ts`)
+- Unit tests for rate limiter and extended evaluator
+- E2E tests for evaluate-extended endpoint
+
+### Changed
+- Refactored `evaluateTab()` to share internal logic via `_evaluateInternal()` — no behavior changes to existing `/evaluate` endpoint
+
+### Fixed
+- Restored missing `POST /sessions/:userId/toggle-display` route that was causing `Cannot POST` 404 errors from MCP toggle_display tool
+
 ## [1.8.1] — 2025-07-15
 
 ### Fixed

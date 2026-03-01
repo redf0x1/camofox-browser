@@ -229,6 +229,24 @@ The VNC session auto-terminates after 2 minutes (configurable via `CAMOFOX_VNC_T
 |----------|-------------|----------|
 | `POST /youtube/transcript` | Extract transcript from YouTube video | `url`, `languages?` |
 
+### Evaluate JavaScript
+Execute a JavaScript expression in the page context and return the JSON-serializable result.
+
+```bash
+POST /tabs/:tabId/evaluate
+{"userId": "agent1", "expression": "document.title"}
+```
+Returns: `{"ok": true, "result": "Page Title", "resultType": "string", "truncated": false}`
+
+### Evaluate JavaScript (Extended)
+Execute a long-running JavaScript expression (up to 300s timeout). Conditionally API-key protected. Rate limited.
+
+```bash
+POST /tabs/:tabId/evaluate-extended
+{"userId": "agent1", "expression": "await fetch('/api').then(r => r.json())", "timeout": 60000}
+```
+Returns: `{"ok": true, "result": {...}, "resultType": "object", "truncated": false}`
+
 ### OpenClaw Endpoints
 
 OpenClaw-compatible aliases (used by the OpenClaw plugin).
@@ -301,6 +319,8 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
 | `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
+| `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX` | `20` | Max evaluate-extended requests per user per window |
+| `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window duration in ms |
 | `CAMOFOX_COOKIES_DIR` | `~/.camofox/cookies` | Directory used by the OpenClaw plugin cookie tool |
 | `CAMOFOX_PROFILES_DIR` | `~/.camofox/profiles` | Profile storage directory (persistent per-user Firefox profiles) |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |
