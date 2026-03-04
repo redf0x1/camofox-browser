@@ -78,7 +78,7 @@ export async function stopTracing(
 	userId: string,
 	context: BrowserContext,
 	outputPath?: string,
-): Promise<{ path: string; size: number }> {
+): Promise<{ path: string; size: number; alreadyStopped?: boolean }> {
 	const state = states.get(userId);
 	if (!state?.active) {
 		throw new Error('No active tracing for this user');
@@ -90,7 +90,19 @@ export async function stopTracing(
 
 	const path = outputPath ? resolveAndValidateOutputPath(outputPath) : defaultPath(userId);
 	ensureOutputDir(path);
-	await context.tracing.stop({ path });
+	try {
+		await context.tracing.stop({ path });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		if (message.includes('Must start tracing')) {
+			if (state.timer) {
+				clearTimeout(state.timer);
+			}
+			states.delete(userId);
+			return { path: '', size: 0, alreadyStopped: true };
+		}
+		throw err;
+	}
 	states.delete(userId);
 	const size = statSync(path).size;
 	return { path, size };

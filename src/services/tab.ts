@@ -370,6 +370,22 @@ function attachConsoleListeners(state: TabState): void {
 		if (state.consoleMessages.length > CONSOLE_BUFFER_SIZE) {
 			state.consoleMessages.shift();
 		}
+
+		if (msg.type() === 'error') {
+			const errorText = msg.text();
+			const now = Date.now();
+			const lastError = state.pageErrors[state.pageErrors.length - 1];
+			if (!lastError || now - lastError.timestamp > 100 || !errorText.includes(lastError.message)) {
+				state.pageErrors.push({
+					timestamp: now,
+					message: errorText,
+					stack: undefined,
+				});
+				if (state.pageErrors.length > CONSOLE_BUFFER_SIZE) {
+					state.pageErrors.shift();
+				}
+			}
+		}
 	});
 
 	page.on('pageerror', (error) => {

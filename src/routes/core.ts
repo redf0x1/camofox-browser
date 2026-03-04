@@ -80,6 +80,7 @@ function getTracingErrorStatus(err: unknown): number {
 	const message = err instanceof Error ? err.message : String(err);
 	if (message.includes('already active')) return 409;
 	if (message.includes('No active tracing')) return 400;
+	if (message.includes('Must start tracing')) return 400;
 	if (message.includes('Tracing not started')) return 400;
 	if (message.includes('Chunk already active')) return 409;
 	if (message.includes('No active chunk')) return 400;
@@ -1205,6 +1206,15 @@ router.post('/tabs/:tabId/trace/stop', async (req, res) => {
 		if (!tab) return res.status(404).json({ ok: false, error: 'Tab not found' });
 
 		const result = await stopTracing(userId, tab.page.context(), path);
+		if (result.alreadyStopped) {
+			return res.json({
+				ok: true,
+				path: result.path,
+				size: result.size,
+				alreadyStopped: true,
+				message: 'Trace was already stopped by chunk stop',
+			});
+		}
 		return res.json({ ok: true, ...result });
 	} catch (err) {
 		const status = getTracingErrorStatus(err);
