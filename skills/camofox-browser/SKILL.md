@@ -1,6 +1,7 @@
 ---
 name: camofox-browser
 description: Anti-detection browser automation for AI agents. Use when the user needs stealth web browsing, undetectable scraping, fingerprint spoofing, proxy rotation, or privacy-focused browser automation. Triggers include "stealth scrape", "anti-detection", "bypass fingerprinting", "camofox", "camoufox", "undetectable browser", "bot evasion", or any browser task requiring evasion of bot detection systems.
+allowed-tools: Bash(camofox:*)
 ---
 
 # camofox-browser Skill

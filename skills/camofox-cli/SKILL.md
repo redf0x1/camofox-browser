@@ -1,6 +1,7 @@
 ---
 name: camofox-cli
-description: CamoFox CLI — 50 commands for anti-detection browser automation from the terminal
+description: CamoFox CLI — 50 commands for anti-detection browser automation from the terminal. Use when the user needs CLI reference for camofox commands, terminal-based browser control, or a quick lookup of command syntax. Triggers include "camofox command", "CLI reference", "terminal browser", or any request for camofox command-line usage.
+allowed-tools: Bash(camofox:*)
 ---
 
 ## 1. Overview

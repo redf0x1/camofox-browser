@@ -1,6 +1,7 @@
 ---
 name: dogfood
-description: QA testing workflow for CamoFox Browser — systematic testing with console capture, error detection, and Playwright tracing
+description: QA testing workflow for CamoFox Browser — systematic testing with console capture, error detection, and Playwright tracing. Use when the user needs to test a web application, perform QA validation, do exploratory testing, or verify web app behavior. Triggers include "test this website", "QA", "dogfood", "exploratory testing", "find bugs", or any request to systematically test a web application.
+allowed-tools: Bash(camofox:*)
 ---
 
 # Dogfood QA Testing — camofox-browser

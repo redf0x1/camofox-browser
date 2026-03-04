@@ -1,6 +1,7 @@
 ---
 name: reddit
-description: Reddit automation with CamoFox CLI — login, browse, post, comment, reply with anti-detection
+description: Reddit automation with CamoFox CLI — login, browse, post, comment, reply with anti-detection. Use when the user needs to automate Reddit interactions, post to subreddits, comment on threads, or browse Reddit programmatically. Triggers include "reddit", "post to reddit", "reddit comment", "reddit automation", or any request to interact with Reddit via browser automation.
+allowed-tools: Bash(camofox:*)
 ---
 
 # Reddit Automation Skill
