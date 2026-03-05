@@ -4,7 +4,6 @@ import { dirname, join, resolve } from 'node:path';
 
 import { Command } from 'commander';
 
-import { HttpError } from '../transport/http';
 import type { CliContext } from '../types';
 import {
 	parseFormat,
@@ -108,52 +107,21 @@ async function checkArgon2Availability(): Promise<{ available: boolean; mode: 'a
 }
 
 async function readSnapshot(context: CliContext, tabId: string, userId: string): Promise<unknown> {
-	try {
-		const response = await context.getTransport().post<{ snapshot?: unknown; tree?: unknown }>(
-			'/api/snapshot-accessibility',
-			{
-				tabId,
-				userId,
-			},
-		);
-		return response.data.snapshot ?? response.data.tree ?? response.data;
-	} catch (error) {
-		if (!(error instanceof HttpError) || error.status !== 404) {
-			throw error;
-		}
-		const response = await context
-			.getTransport()
-			.get<{ snapshot?: unknown }>(`/snapshot?targetId=${encodeURIComponent(tabId)}&userId=${encodeURIComponent(userId)}`);
-		return response.data.snapshot ?? response.data;
-	}
+	const response = await context
+		.getTransport()
+		.get<{ snapshot?: unknown }>(`/snapshot?targetId=${encodeURIComponent(tabId)}&userId=${encodeURIComponent(userId)}`);
+	return response.data.snapshot ?? response.data;
 }
 
 async function readScreenshot(context: CliContext, tabId: string, userId: string): Promise<string> {
-	try {
-		const response = await context.getTransport().post<{ screenshot?: string; imageBase64?: string }>('/api/screenshot', {
-			tabId,
-			userId,
-			fullPage: false,
-		});
-		const base64 = response.data.screenshot ?? response.data.imageBase64;
-		if (!base64) {
-			throw new Error('Server did not return screenshot data');
-		}
-		return base64;
-	} catch (error) {
-		if (!(error instanceof HttpError) || error.status !== 404) {
-			throw error;
-		}
-
-		const query = new URLSearchParams({ userId, fullPage: 'false' });
-		const legacyUrl = `${context.getTransport().getBaseUrl()}/tabs/${encodeURIComponent(tabId)}/screenshot?${query.toString()}`;
-		const response = await fetch(legacyUrl);
-		if (!response.ok) {
-			throw new Error(`Legacy screenshot request failed: HTTP ${response.status}`);
-		}
-		const bytes = Buffer.from(await response.arrayBuffer());
-		return bytes.toString('base64');
+	const query = new URLSearchParams({ userId, fullPage: 'false' });
+	const legacyUrl = `${context.getTransport().getBaseUrl()}/tabs/${encodeURIComponent(tabId)}/screenshot?${query.toString()}`;
+	const response = await fetch(legacyUrl);
+	if (!response.ok) {
+		throw new Error(`Legacy screenshot request failed: HTTP ${response.status}`);
 	}
+	const bytes = Buffer.from(await response.arrayBuffer());
+	return bytes.toString('base64');
 }
 
 export function registerAdvancedCommands(program: Command, context: CliContext): void {
@@ -175,32 +143,9 @@ export function registerAdvancedCommands(program: Command, context: CliContext):
 					const userId = resolveCommandUser({ command, user: options.user });
 					const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
 
-					let screenshotBase64: string | undefined;
-					let refs: RefEntry[] = [];
-					let usedServerAnnotationEndpoint = false;
-
-					try {
-						const response = await context
-							.getTransport()
-							.post<{ screenshot?: string; imageBase64?: string; refs?: RefEntry[] }>('/api/annotated-screenshot', {
-								tabId,
-								userId,
-							});
-						screenshotBase64 = response.data.screenshot ?? response.data.imageBase64;
-						if (!screenshotBase64) {
-							throw new Error('Server did not return annotated screenshot data');
-						}
-						refs = Array.isArray(response.data.refs) ? response.data.refs : [];
-						usedServerAnnotationEndpoint = true;
-					} catch (error) {
-						if (!(error instanceof HttpError) || error.status !== 404) {
-							throw error;
-						}
-
-						const snapshotPayload = await readSnapshot(context, tabId, userId);
-						refs = collectRefs(snapshotPayload);
-						screenshotBase64 = await readScreenshot(context, tabId, userId);
-					}
+					const snapshotPayload = await readSnapshot(context, tabId, userId);
+					const refs: RefEntry[] = collectRefs(snapshotPayload);
+					const screenshotBase64 = await readScreenshot(context, tabId, userId);
 
 					if (!screenshotBase64) {
 						throw new Error('Unable to generate annotated screenshot payload');
@@ -214,7 +159,7 @@ export function registerAdvancedCommands(program: Command, context: CliContext):
 						path: outputPath,
 						tabId,
 						userId,
-						annotatedByServer: usedServerAnnotationEndpoint,
+						annotatedByServer: false,
 						refs,
 					};
 
@@ -260,15 +205,11 @@ export function registerAdvancedCommands(program: Command, context: CliContext):
 				let tabCount = 0;
 				if (serverRunning) {
 					try {
-						const tabs = await context.getTransport().get('/api/tabs');
+						const tabs = await context.getTransport().get(`/tabs?userId=${encodeURIComponent(resolveUserId({}))}`);
 						tabCount = parseTabCount(tabs.data);
-					} catch (error) {
-						if (!(error instanceof HttpError) || error.status !== 404) {
-							throw error;
-						}
-						const userId = resolveUserId({});
-						const tabs = await context.getTransport().get(`/tabs?userId=${encodeURIComponent(userId)}`);
-						tabCount = parseTabCount(tabs.data);
+					} catch {
+						// Tab listing may fail if no tabs open — graceful fallback
+						tabCount = 0;
 					}
 				}
 

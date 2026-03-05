@@ -265,6 +265,12 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 			text: string;
 			submit?: boolean;
 		}
+		interface ActSelectRequest extends ActRequestBase {
+			kind: 'select';
+			ref?: string;
+			selector?: string;
+			value: string;
+		}
 		interface ActPressRequest extends ActRequestBase {
 			kind: 'press';
 			key: string;
@@ -367,6 +373,26 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 						const locator = tabState.page.locator(String(selector));
 						await smartFill(locator, tabState.page, text);
 						if (submit) await tabState.page.keyboard.press('Enter');
+					}
+					return { ok: true, targetId };
+				}
+
+				case 'select': {
+					const params = body as unknown as ActSelectRequest;
+					const { ref, selector, value } = params;
+					if (!ref && !selector) {
+						throw new Error('ref or selector required');
+					}
+					if (typeof value !== 'string') {
+						throw new Error('value is required');
+					}
+
+					if (ref) {
+						const locator = refToLocator(tabState.page, ref, tabState.refs);
+						if (!locator) throw new Error(`Unknown ref: ${ref}`);
+						await locator.selectOption(value);
+					} else {
+						await tabState.page.locator(String(selector)).selectOption(value);
 					}
 					return { ok: true, targetId };
 				}

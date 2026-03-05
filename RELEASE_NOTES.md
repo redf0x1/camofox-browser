@@ -1,3 +1,21 @@
+## v2.0.3 (2026-03-05)
+
+### Bug Fixes
+- **`fill` command**: Fixed ref format mismatch - bare refs (`e1`) now correctly sent to server instead of bracketed (`[e1]`)
+- **`select` command**: Fixed fallback to use `selectOption()` instead of `fill()` for `<select>` elements; supports both value and label matching
+- **`auth load --inject`**: Reimplemented credential injection using `/act` type calls instead of non-existent `/fill-form` endpoint
+
+### Removed
+- **`drag` command**: Removed dead code - no server endpoint existed for drag-and-drop
+
+### Performance
+- **Eliminated double HTTP requests**: All CLI commands now call correct endpoints directly, removing wasteful 404 fallback to `/api/*` paths
+
+### Internal
+- Deleted unused `api-fallback.ts` utility
+- Added `case 'select'` handler to `/act` endpoint in openclaw.ts
+- Cleaned up degenerate error handlers in health and downloads commands
+
 ## v2.0.2 (2026-03-05)
 
 ### Bug Fixes

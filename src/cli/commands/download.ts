@@ -5,7 +5,6 @@ import { Command } from 'commander';
 
 import { HttpError } from '../transport/http';
 import type { CliContext } from '../types';
-import { requestWithFallback } from '../utils/api-fallback';
 import { requireTabId, printWithOptionalFormat, resolveCommandUser } from '../utils/command-helpers';
 import { atomicWrite } from '../utils/fs-helpers';
 import { resolveTabId } from '../utils/session-resolver';
@@ -25,7 +24,8 @@ function parseCookiesFromFile(path: string): unknown[] {
 
 async function exportCookies(context: CliContext, tabId: string, userId: string): Promise<unknown[]> {
 	try {
-		return await requestWithFallback(context.getTransport(), '/api/export-cookies', '/export-cookies', { tabId, userId });
+		const response = await context.getTransport().post<unknown[]>('/export-cookies', { tabId, userId });
+		return response.data;
 	} catch (error) {
 		if (!(error instanceof HttpError) || error.status !== 404) {
 			throw error;
@@ -80,7 +80,7 @@ export function registerDownloadCommands(program: Command, context: CliContext):
 				const cookies = parseCookiesFromFile(filePath);
 
 				try {
-					await requestWithFallback(context.getTransport(), '/api/import-cookies', '/import-cookies', {
+					await context.getTransport().post('/import-cookies', {
 						tabId,
 						userId,
 						cookies,
@@ -145,20 +145,13 @@ export function registerDownloadCommands(program: Command, context: CliContext):
 						.get(`/users/${encodeURIComponent(userId)}/downloads`);
 					data = response.data;
 				} catch (error) {
+					// Fallback to older downloads endpoint if the specific user endpoint returns 404
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
 					}
 
-					try {
-					const response = await context.getTransport().get(`/api/downloads?userId=${encodeURIComponent(userId)}`);
+					const response = await context.getTransport().get(`/downloads?userId=${encodeURIComponent(userId)}`);
 					data = response.data;
-					} catch (fallbackError) {
-						if (!(fallbackError instanceof HttpError) || fallbackError.status !== 404) {
-							throw fallbackError;
-						}
-						const response = await context.getTransport().get(`/downloads?userId=${encodeURIComponent(userId)}`);
-						data = response.data;
-					}
 				}
 
 				printWithOptionalFormat(context, command, options.format, data);

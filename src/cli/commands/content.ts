@@ -4,7 +4,6 @@ import { resolveCommandUser, requireTabId } from '../utils/command-helpers';
 import { resolveTabId } from '../utils/session-resolver';
 import { HttpError } from '../transport/http';
 import type { CliContext } from '../types';
-import { apiRequestWithFallback } from '../utils/api-fallback';
 
 type SearchEngine =
 	| 'google'
@@ -83,7 +82,8 @@ export function registerContentCommands(program: Command, context: CliContext): 
 
 				let data: unknown;
 				try {
-					data = await apiRequestWithFallback(context.getTransport(), '/api/get-text', '/get-text', body);
+					const response = await context.getTransport().post('/get-text', body);
+					data = response.data;
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -115,7 +115,8 @@ export function registerContentCommands(program: Command, context: CliContext): 
 				let data: unknown;
 
 				try {
-					data = await apiRequestWithFallback(context.getTransport(), '/api/get-url', '/get-url', { tabId, userId });
+					const response = await context.getTransport().post('/get-url', { tabId, userId });
+					data = response.data;
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -149,7 +150,8 @@ export function registerContentCommands(program: Command, context: CliContext): 
 
 				let data: unknown;
 				try {
-					data = await apiRequestWithFallback(context.getTransport(), '/api/get-links', '/get-links', { tabId, userId });
+					const response = await context.getTransport().post('/get-links', { tabId, userId });
+					data = response.data;
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -196,7 +198,8 @@ export function registerContentCommands(program: Command, context: CliContext): 
 				let data: unknown;
 
 				try {
-					data = await apiRequestWithFallback(context.getTransport(), '/api/get-tabs', '/get-tabs', { userId });
+					const response = await context.getTransport().post('/get-tabs', { userId });
+					data = response.data;
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -225,11 +228,12 @@ export function registerContentCommands(program: Command, context: CliContext): 
 
 				let data: unknown;
 				try {
-					data = await apiRequestWithFallback(context.getTransport(), '/api/evaluate', '/evaluate', {
+					const response = await context.getTransport().post('/evaluate', {
 						tabId,
 						userId,
 						expression,
 					});
+					data = response.data;
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -268,7 +272,7 @@ export function registerContentCommands(program: Command, context: CliContext): 
 					if (timeout !== undefined) body.timeout = timeout;
 
 					try {
-						await apiRequestWithFallback(context.getTransport(), '/api/wait-for', '/wait-for', body);
+						await context.getTransport().post('/wait-for', body);
 					} catch (error) {
 						if (!(error instanceof HttpError) || error.status !== 404) {
 							throw error;
@@ -320,12 +324,13 @@ export function registerContentCommands(program: Command, context: CliContext): 
 
 					let data: unknown;
 					try {
-						data = await apiRequestWithFallback(context.getTransport(), '/api/web-search', '/web-search', {
+						const response = await context.getTransport().post('/web-search', {
 							tabId,
 							userId,
 							query,
 							engine,
 						});
+						data = response.data;
 					} catch (error) {
 						if (!(error instanceof HttpError) || error.status !== 404) {
 							throw error;

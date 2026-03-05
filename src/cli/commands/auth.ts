@@ -6,9 +6,9 @@ import { createInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 
 import type { CliContext } from '../types';
-import { requestWithFallback } from '../utils/api-fallback';
 import { printWithOptionalFormat, requireTabId, resolveCommandUser } from '../utils/command-helpers';
 import { resolveTabId } from '../utils/session-resolver';
+import { toElementTarget } from '../utils/selector';
 import {
 	VAULT_DIR,
 	deleteProfile,
@@ -196,13 +196,19 @@ export function registerAuthCommands(program: Command, context: CliContext): voi
 						const injectTabId = typeof options.inject === 'string' ? options.inject : undefined;
 						const tabId = requireTabId(resolveTabId({ tabId: injectTabId }), options);
 						const transport = context.getTransport();
-						await requestWithFallback<{ success: boolean }>(transport, '/fill-form', '/api/fill-form', {
-							tabId,
+						await transport.post('/act', {
+							kind: 'type',
+							targetId: tabId,
 							userId,
-							formData: [
-								{ ref: usernameRef, value: profile.username },
-								{ ref: passwordRef, value: profile.password },
-							],
+							...toElementTarget(usernameRef),
+							text: profile.username,
+						});
+						await transport.post('/act', {
+							kind: 'type',
+							targetId: tabId,
+							userId,
+							...toElementTarget(passwordRef),
+							text: profile.password,
 						});
 						context.print(command, 'Credentials injected into tab');
 						return;

@@ -3,7 +3,6 @@ import { Command } from 'commander';
 import { resolveCommandUser, requireTabId } from '../utils/command-helpers';
 import { clearActiveTabId, resolveTabId, writeActiveTabId } from '../utils/session-resolver';
 import { toElementTarget } from '../utils/selector';
-import { HttpError } from '../transport/http';
 import type { CliContext } from '../types';
 
 function parseViewport(viewport: string | undefined): { width: number; height: number } | undefined {
@@ -27,24 +26,13 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const viewport = parseViewport(options.viewport);
-				let response;
-				try {
-					response = await context.getTransport().post<{ tabId: string }>('/api/create-tab', {
-						url,
-						userId,
-						viewport,
-						geoPreset: options.geo,
-					});
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					response = await context.getTransport().post<{ tabId?: string; targetId?: string }>('/tabs/open', {
-						url,
-						userId,
-						listItemId: 'default',
-					});
-				}
+				const response = await context.getTransport().post<{ tabId?: string; targetId?: string }>('/tabs/open', {
+					url,
+					userId,
+					listItemId: 'default',
+					viewport,
+					geoPreset: options.geo,
+				});
 
 				const tabId = (response.data as { tabId?: string; targetId?: string }).tabId ?? (response.data as { targetId?: string }).targetId;
 				if (!tabId) {
@@ -75,17 +63,7 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 				if (!resolvedTabId) {
 					throw new Error('No tab specified. Provide a tabId or open a tab first with "camofox open <url>".');
 				}
-				try {
-					await context.getTransport().post('/api/close-tab', {
-						tabId: resolvedTabId,
-						userId,
-					});
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					await context.getTransport().delete(`/tabs/${encodeURIComponent(resolvedTabId)}`, { userId });
-				}
+				await context.getTransport().delete(`/tabs/${encodeURIComponent(resolvedTabId)}`, { userId });
 
 				const activeTab = resolveTabId({});
 				if (activeTab === resolvedTabId) {
@@ -107,20 +85,9 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-				let response;
-				try {
-					response = await context.getTransport().post<{ snapshot?: string; tree?: string }>('/api/snapshot-accessibility', {
-						tabId,
-						userId,
-					});
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					response = await context
-						.getTransport()
-						.get<{ snapshot?: string }>(`/snapshot?targetId=${encodeURIComponent(tabId)}&userId=${encodeURIComponent(userId)}`);
-				}
+				const response = await context
+					.getTransport()
+					.get<{ snapshot?: string }>(`/snapshot?targetId=${encodeURIComponent(tabId)}&userId=${encodeURIComponent(userId)}`);
 
 				const data = response.data as { snapshot?: unknown; tree?: unknown };
 				const content = data.snapshot ?? data.tree ?? response.data;
@@ -141,21 +108,10 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
 				const target = toElementTarget(ref);
-				try {
-					await context.getTransport().post('/api/click', {
-						tabId,
-						userId,
-						...target,
-					});
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/click`, {
-						userId,
-						...target,
-					});
-				}
+				await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/click`, {
+					userId,
+					...target,
+				});
 				context.print(command, { ok: true });
 			} catch (error) {
 				context.handleError(error);
@@ -174,23 +130,11 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
 				const target = toElementTarget(ref);
-				try {
-					await context.getTransport().post('/api/type', {
-						tabId,
-						userId,
-						...target,
-						text,
-					});
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/type`, {
-						userId,
-						...target,
-						text,
-					});
-				}
+				await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/type`, {
+					userId,
+					...target,
+					text,
+				});
 				context.print(command, { ok: true });
 			} catch (error) {
 				context.handleError(error);

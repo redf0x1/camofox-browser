@@ -6,7 +6,6 @@ import { Command } from 'commander';
 
 import { resolveCommandUser, requireTabId } from '../utils/command-helpers';
 import { resolveTabId } from '../utils/session-resolver';
-import { HttpError } from '../transport/http';
 import type { CliContext } from '../types';
 
 function ensureParentDir(filePath: string): void {
@@ -30,22 +29,11 @@ export function registerNavigationCommands(program: Command, context: CliContext
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-				try {
-					await context.getTransport().post('/api/navigate', {
-						tabId,
-						userId,
-						url,
-					});
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					await context.getTransport().post('/navigate', {
-						targetId: tabId,
-						userId,
-						url,
-					});
-				}
+				await context.getTransport().post('/navigate', {
+					targetId: tabId,
+					userId,
+					url,
+				});
 				context.print(command, { ok: true, tabId, url });
 			} catch (error) {
 				context.handleError(error);
@@ -73,33 +61,16 @@ export function registerNavigationCommands(program: Command, context: CliContext
 				try {
 					const userId = resolveCommandUser({ command, user: options.user });
 					const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-					let base64: string | undefined;
-
-					try {
-						const response = await context
-							.getTransport()
-							.post<{ screenshot?: string; imageBase64?: string }>('/api/screenshot', {
-								tabId,
-								userId,
-								fullPage: Boolean(options.fullPage),
-							});
-						base64 = response.data.screenshot ?? response.data.imageBase64;
-					} catch (error) {
-						if (!(error instanceof HttpError) || error.status !== 404) {
-							throw error;
-						}
-
-						const query = new URLSearchParams({ userId, fullPage: String(Boolean(options.fullPage)) });
-						const legacyUrl = `${context
-							.getTransport()
-							.getBaseUrl()}/tabs/${encodeURIComponent(tabId)}/screenshot?${query.toString()}`;
-						const legacyResponse = await fetch(legacyUrl);
-						if (!legacyResponse.ok) {
-							throw new Error(`Legacy screenshot request failed: HTTP ${legacyResponse.status}`);
-						}
-						const bytes = Buffer.from(await legacyResponse.arrayBuffer());
-						base64 = bytes.toString('base64');
+					const query = new URLSearchParams({ userId, fullPage: String(Boolean(options.fullPage)) });
+					const legacyUrl = `${context
+						.getTransport()
+						.getBaseUrl()}/tabs/${encodeURIComponent(tabId)}/screenshot?${query.toString()}`;
+					const legacyResponse = await fetch(legacyUrl);
+					if (!legacyResponse.ok) {
+						throw new Error(`Legacy screenshot request failed: HTTP ${legacyResponse.status}`);
 					}
+					const bytes = Buffer.from(await legacyResponse.arrayBuffer());
+					const base64 = bytes.toString('base64');
 
 					if (!base64) {
 						throw new Error('Server did not return screenshot data');
@@ -126,14 +97,7 @@ export function registerNavigationCommands(program: Command, context: CliContext
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-				try {
-					await context.getTransport().post('/api/go-back', { tabId, userId });
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/back`, { userId });
-				}
+				await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/back`, { userId });
 				context.print(command, { ok: true });
 			} catch (error) {
 				context.handleError(error);
@@ -149,14 +113,7 @@ export function registerNavigationCommands(program: Command, context: CliContext
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-				try {
-					await context.getTransport().post('/api/go-forward', { tabId, userId });
-				} catch (error) {
-					if (!(error instanceof HttpError) || error.status !== 404) {
-						throw error;
-					}
-					await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/forward`, { userId });
-				}
+				await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/forward`, { userId });
 				context.print(command, { ok: true });
 			} catch (error) {
 				context.handleError(error);

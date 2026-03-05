@@ -4,7 +4,6 @@ import { resolveCommandUser, requireTabId } from '../utils/command-helpers';
 import { resolveTabId } from '../utils/session-resolver';
 import { HttpError } from '../transport/http';
 import type { CliContext } from '../types';
-import { apiRequestWithFallback } from '../utils/api-fallback';
 import { toElementTarget } from '../utils/selector';
 
 type FormPair = { ref: string; value: string };
@@ -41,8 +40,8 @@ function parseFillAssignments(assignments: string): FormPair[] {
 			throw new Error('Invalid assignments format. Expected: [e1]="value1" [e2]="value2"');
 		}
 
-		const ref = `[${match[1].trim()}]`;
-		if (ref === '[]') {
+		const ref = match[1].trim();
+		if (!ref) {
 			throw new Error('Invalid assignments format. Element ref cannot be empty.');
 		}
 
@@ -72,7 +71,7 @@ export function registerInteractionCommands(program: Command, context: CliContex
 				const body = { tabId, userId, formData };
 
 				try {
-					await apiRequestWithFallback(context.getTransport(), '/api/fill-form', '/fill-form', body);
+					await context.getTransport().post('/fill-form', body);
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -127,7 +126,7 @@ export function registerInteractionCommands(program: Command, context: CliContex
 					if (amount !== undefined) body.amount = amount;
 
 					try {
-						await apiRequestWithFallback(context.getTransport(), '/api/scroll', '/scroll', body);
+						await context.getTransport().post('/scroll', body);
 					} catch (error) {
 						if (!(error instanceof HttpError) || error.status !== 404) {
 							throw error;
@@ -169,17 +168,17 @@ export function registerInteractionCommands(program: Command, context: CliContex
 				const body = { tabId, userId, ...target, value };
 
 				try {
-					await apiRequestWithFallback(context.getTransport(), '/api/select-option', '/select-option', body);
+					await context.getTransport().post('/select-option', body);
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
 					}
 					await context.getTransport().post('/act', {
-						kind: 'type',
+						kind: 'select',
 						targetId: tabId,
 						userId,
 						...target,
-						text: value,
+						value,
 					});
 				}
 
@@ -202,7 +201,7 @@ export function registerInteractionCommands(program: Command, context: CliContex
 				const body = { tabId, userId, ...target };
 
 				try {
-					await apiRequestWithFallback(context.getTransport(), '/api/hover', '/hover', body);
+					await context.getTransport().post('/hover', body);
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -233,7 +232,7 @@ export function registerInteractionCommands(program: Command, context: CliContex
 				const body = { tabId, userId, key };
 
 				try {
-					await apiRequestWithFallback(context.getTransport(), '/api/press-key', '/press-key', body);
+					await context.getTransport().post('/press-key', body);
 				} catch (error) {
 					if (!(error instanceof HttpError) || error.status !== 404) {
 						throw error;
@@ -258,34 +257,4 @@ export function registerInteractionCommands(program: Command, context: CliContex
 				context.handleError(error);
 			}
 		});
-
-	program
-		.command('drag')
-		.argument('<fromRef>', 'source element ref')
-		.argument('<toRef>', 'target element ref')
-		.argument('[tabId]', 'tab id (defaults to active tab)')
-		.option('--user <user>', 'user id')
-		.action(
-			async (
-				fromRef: string,
-				toRef: string,
-				tabIdArg: string | undefined,
-				options: { user?: string },
-				command: Command,
-			) => {
-				try {
-					const userId = resolveCommandUser({ command, user: options.user });
-					const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-					await apiRequestWithFallback(context.getTransport(), '/api/drag', '/drag', {
-						tabId,
-						userId,
-						sourceRef: fromRef,
-						targetRef: toRef,
-					});
-					context.print(command, { ok: true });
-				} catch (error) {
-					context.handleError(error);
-				}
-			},
-		);
 }
