@@ -2,6 +2,7 @@ import { closeSync, openSync, mkdirSync, readFileSync, renameSync, rmSync, write
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { Socket } from 'node:net';
 
 export interface ServerStatus {
 	running: boolean;
@@ -55,6 +56,11 @@ export class ServerManager {
 	public async startDaemon(options?: { idleTimeoutMs?: number; port?: number }): Promise<void> {
 		const targetPort = ServerManager.getPort(options?.port ?? this.port);
 		this.ensureDirectories();
+		if (await this.isPortInUse(targetPort)) {
+			throw new Error(
+				`Port ${targetPort} is already in use. If a stale daemon is running, stop it with \"camofox server stop\" and retry.`,
+			);
+		}
 
 		const logFd = openSync(this.logFilePath, 'a');
 		try {
@@ -130,7 +136,12 @@ export class ServerManager {
 			timeoutId.unref();
 			const response = await fetch(`http://127.0.0.1:${this.port}/health`, { signal: controller.signal });
 			clearTimeout(timeoutId);
-			return response.status === 200;
+			if (response.status !== 200) {
+				return false;
+			}
+
+			const body = (await response.json()) as Record<string, unknown>;
+			return body?.engine === 'camoufox' && body?.running === true;
 		} catch {
 			return false;
 		}
@@ -202,6 +213,26 @@ export class ServerManager {
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => resolve(), ms);
 			timer.unref();
+		});
+	}
+
+	private async isPortInUse(port: number): Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			const socket = new Socket();
+			let settled = false;
+
+			const finish = (result: boolean): void => {
+				if (settled) return;
+				settled = true;
+				socket.destroy();
+				resolve(result);
+			};
+
+			socket.setTimeout(300);
+			socket.once('connect', () => finish(true));
+			socket.once('timeout', () => finish(false));
+			socket.once('error', () => finish(false));
+			socket.connect(port, '127.0.0.1');
 		});
 	}
 

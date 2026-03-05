@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { resolve } from 'node:path';
 
 import { Router, type Request, type Response } from 'express';
 import type { Locator } from 'playwright-core';
@@ -37,6 +38,15 @@ import {
 } from '../services/tab';
 
 const CONFIG = loadConfig();
+const PKG_VERSION = (() => {
+	const pkgPath = resolve(__dirname, '../../../package.json');
+	const raw = fs.readFileSync(pkgPath, 'utf8');
+	const pkg = JSON.parse(raw) as { version?: unknown };
+	if (typeof pkg.version !== 'string' || pkg.version.trim().length === 0) {
+		throw new Error('Unable to resolve server version from package.json');
+	}
+	return pkg.version;
+})();
 
 const router = Router();
 
@@ -66,6 +76,7 @@ router.get('/', async (_req: Request, res: Response) => {
 			enabled: true,
 			running: true,
 			engine: 'camoufox',
+			version: PKG_VERSION,
 			browserConnected: activeUserIds.length > 0,
 			poolSize: contextPool.size(),
 			activeUserIds,

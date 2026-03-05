@@ -20,7 +20,11 @@ import { ServerManager } from './server/manager';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8'));
+const pkg = JSON.parse(readFileSync(join(__dirname, '../../../package.json'), 'utf-8')) as { version?: unknown };
+if (typeof pkg.version !== 'string' || !pkg.version.trim()) {
+	throw new Error('Unable to resolve CLI version from package.json');
+}
+const CLI_VERSION = pkg.version;
 
 function getGlobalOptions(command: Command): { port?: string; format?: OutputFormat; local?: boolean } {
 	const withGlobals = command.optsWithGlobals();
@@ -33,7 +37,7 @@ export async function run(argv = process.argv): Promise<void> {
 	program
 		.name('camofox')
 		.description('CLI for camofox-browser REST API')
-		.version(pkg.version, '-V, --version', 'Output the version number')
+		.version(CLI_VERSION, '-V, --version', 'Output the version number')
 		.option('--user <user>', 'default user id (overrides CAMOFOX_CLI_USER)')
 		.option('--port <port>', 'server port (overrides CAMOFOX_PORT)')
 		.option('--format <format>', 'output format: json|text|plain', 'text')

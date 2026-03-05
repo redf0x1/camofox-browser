@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { resolve } from 'node:path';
 
 import express, { Router, type Request, type Response } from 'express';
 
@@ -69,6 +70,15 @@ import {
 import type { CookieInput, ContextOverrides, TabState } from '../types';
 
 const CONFIG = loadConfig();
+const PKG_VERSION = (() => {
+	const pkgPath = resolve(__dirname, '../../../package.json');
+	const raw = fs.readFileSync(pkgPath, 'utf8');
+	const pkg = JSON.parse(raw) as { version?: unknown };
+	if (typeof pkg.version !== 'string' || pkg.version.trim().length === 0) {
+		throw new Error('Unable to resolve server version from package.json');
+	}
+	return pkg.version;
+})();
 
 const router = Router();
 
@@ -216,6 +226,7 @@ router.get('/health', async (_req: Request, res: Response) => {
 			ok: true,
 			running: true,
 			engine: 'camoufox',
+			version: PKG_VERSION,
 			browserConnected: activeUserIds.length > 0,
 			poolSize: contextPool.size(),
 			activeUserIds,
