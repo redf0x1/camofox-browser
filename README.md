@@ -195,6 +195,8 @@ camofox eval "document.title"          # Execute JavaScript
 camofox wait <selector> [--timeout ms] # Wait for element
 ```
 
+> **Text input:** CamoFox has no character limit for typed or filled text. Short text stays humanized for anti-detection, while long text automatically switches to bulk DOM insertion so large inputs do not truncate.
+
 ### Session Management
 
 ```bash

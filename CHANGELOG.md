@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.8.2] - 2026-03-08
+
+### Fixed
+- Resolved text input truncation at ~500 characters caused by humanize typing delay + 30s handler timeout
+- `smartFill()` now uses bulk DOM insertion via `page.evaluate()` for text >= 400 characters
+- Dynamic typing timeout replaces fixed 30s limit: 10,000ms base + 80ms per character (max 120,000ms)
+
+### Changed
+- Short text (<400 chars) continues to use humanized per-character typing for anti-detection
+- ContentEditable elements use `document.execCommand('insertText')` for rich text compatibility
+
 ## [2.0.0] — 2026-03-03
 
 ### ✨ Added
