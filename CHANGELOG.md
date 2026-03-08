@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.8.2] - 2026-03-08
+## [2.0.5] - 2026-03-08
 
 ### Fixed
 - Resolved text input truncation at ~500 characters caused by humanize typing delay + 30s handler timeout
