@@ -46,6 +46,7 @@ export interface ServerEnv {
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
   PROXY_PASSWORD?: string;
+  CAMOFOX_DEFAULT_PRESET?: string;
 }
 
 export interface AppConfig {
@@ -77,6 +78,7 @@ export interface AppConfig {
   evalExtendedRateLimitWindowMs: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
+  defaultPreset: string;
 }
 
 export interface ConfigEnv extends NodeJS.ProcessEnv {
@@ -111,6 +113,7 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
   PROXY_PASSWORD?: string;
+  CAMOFOX_DEFAULT_PRESET?: string;
   PATH?: string;
   HOME?: string;
 }
@@ -175,6 +178,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const evalExtendedRateLimitMax = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX, 20);
   const evalExtendedRateLimitWindowMs = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS, 60000);
 
+  const defaultPreset = env.CAMOFOX_DEFAULT_PRESET || '';
+
   const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
   const maxBatchConcurrency = parsePositiveIntOrDefault(env.CAMOFOX_MAX_BATCH_CONCURRENCY, 5);
@@ -208,6 +213,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     headless,
     evalExtendedRateLimitMax,
     evalExtendedRateLimitWindowMs,
+    defaultPreset,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',
@@ -241,6 +247,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_HEADLESS: env.CAMOFOX_HEADLESS,
       CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX,
       CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS,
+      CAMOFOX_DEFAULT_PRESET: env.CAMOFOX_DEFAULT_PRESET,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,

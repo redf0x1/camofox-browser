@@ -620,6 +620,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_CLI_USER` | `cli-default` | Default CLI user id |
 | `CAMOFOX_IDLE_TIMEOUT_MS` | `1800000` | CLI server idle timeout |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |
+| `CAMOFOX_DEFAULT_PRESET` | (unset) | Optional default preset name used for session locale/timezone/geolocation when no proxy is configured and no overrides are supplied; falls back to the first built-in preset if unset/invalid |
 | `CAMOFOX_SESSION_TIMEOUT` | `1800000` | Session idle timeout in ms (min `60000`) |
 | `CAMOFOX_MAX_SESSIONS` | `50` | Maximum concurrent sessions |
 | `CAMOFOX_MAX_TABS` | `10` | Maximum tabs per session |

@@ -443,6 +443,7 @@ Source of truth: `src/utils/config.ts`, `src/services/session.ts`, `src/services
 | `CAMOFOX_MAX_SESSIONS` | `50` | Max live sessions |
 | `CAMOFOX_MAX_TABS` | `10` | Max tabs per session |
 | `CAMOFOX_PRESETS_FILE` | unset | Custom presets JSON file |
+| `CAMOFOX_DEFAULT_PRESET` | unset | Optional default preset name used for session locale/timezone/geolocation when no proxy is configured and no overrides are supplied; falls back to the first built-in preset if unset/invalid |
 | `PROXY_HOST` | empty | Proxy host |
 | `PROXY_PORT` | empty | Proxy port |
 | `PROXY_USERNAME` | empty | Proxy username |

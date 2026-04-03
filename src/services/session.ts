@@ -4,6 +4,7 @@ import type { ContextOverrides, SessionData, TabState } from '../types';
 import { log } from '../middleware/logging';
 import { clearTabLock, clearAllTabLocks } from './tab';
 import { loadConfig } from '../utils/config';
+import { BUILT_IN_PRESETS, resolvePreset } from '../utils/presets';
 import { contextPool } from './context-pool';
 import { cleanupUserDownloads } from './download';
 import { decrementActiveOps, incrementActiveOps } from './health';
@@ -244,10 +245,32 @@ export async function getSession(userId: unknown, contextOverrides?: ContextOver
 
 	// With proxy+geoip, camoufox auto-configures locale/timezone/geo from proxy IP.
 	// If caller explicitly supplies overrides, apply them even when proxy is active.
+	// Determine default preset options: configured default or fallback to first built-in
+	let defaultPresetOptions: Record<string, unknown> | null = null;
+	const configuredDefault = CONFIG.defaultPreset && CONFIG.defaultPreset.trim() ? CONFIG.defaultPreset.trim() : '';
+	if (configuredDefault) {
+		const presetResolved = resolvePreset(configuredDefault);
+		if (presetResolved) {
+			defaultPresetOptions = presetResolved as Record<string, unknown>;
+		} else {
+			log('warn', 'configured default preset not found, falling back to built-in first preset', { preset: configuredDefault });
+		}
+	}
+	if (!defaultPresetOptions) {
+		const builtinKeys = Object.keys(BUILT_IN_PRESETS);
+		if (builtinKeys.length) {
+			const first = builtinKeys[0];
+			const presetResolved = resolvePreset(first);
+			if (presetResolved) defaultPresetOptions = presetResolved as Record<string, unknown>;
+		}
+	}
+
+	// With proxy+geoip, camoufox auto-configures locale/timezone/geo from proxy IP.
+	// If caller explicitly supplies overrides, apply them even when proxy is active.
 	if (!CONFIG.proxy.host || hasOverrides) {
-		contextOptions.locale = resolved.locale || 'en-US';
-		contextOptions.timezoneId = resolved.timezoneId || 'America/Los_Angeles';
-		contextOptions.geolocation = resolved.geolocation || { latitude: 37.7749, longitude: -122.4194 };
+		contextOptions.locale = resolved.locale || (defaultPresetOptions?.locale as string) || 'en-US';
+		contextOptions.timezoneId = resolved.timezoneId || (defaultPresetOptions?.timezoneId as string) || 'America/Los_Angeles';
+		contextOptions.geolocation = resolved.geolocation || (defaultPresetOptions?.geolocation as { latitude: number; longitude: number }) || { latitude: 37.7749, longitude: -122.4194 };
 	}
 
 	if (!session) {

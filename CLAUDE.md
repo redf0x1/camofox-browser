@@ -6,6 +6,7 @@ CamoFox is a TypeScript browser automation server + CLI over the Camoufox anti-d
 ## Key Context
 - Default server URL: `http://localhost:9377`
 - Default port envs: `CAMOFOX_PORT` / `PORT` (typically 9377)
+ - Default preset env var: `CAMOFOX_DEFAULT_PRESET` (optional) — when set and no proxy is configured, this preset's locale/timezone/geolocation are used for new sessions if the caller provides no overrides.
 - Core identity fields: `userId`, `tabId`, `sessionKey` (or legacy `listItemId`)
 - Refs come from snapshot as `eN`-style element references
 
