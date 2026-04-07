@@ -2,6 +2,8 @@ import { closeSync, openSync, mkdirSync, readFileSync, renameSync, rmSync, write
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+
+import { loadConfig } from '../../utils/config';
 import { Socket } from 'node:net';
 
 export interface ServerStatus {
@@ -12,8 +14,6 @@ export interface ServerStatus {
 	tabsCount: number;
 }
 
-const DEFAULT_PORT = 9377;
-const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const SERVER_BIN_PATH = resolve(__dirname, '../../../../bin/camofox-browser.js');
 
 export class ServerManager {
@@ -33,16 +33,7 @@ export class ServerManager {
 		if (typeof overridePort === 'number' && ServerManager.isValidPort(overridePort)) {
 			return overridePort;
 		}
-
-		const envPort = process.env.CAMOFOX_PORT;
-		if (envPort) {
-			const parsed = Number(envPort);
-			if (ServerManager.isValidPort(parsed)) {
-				return parsed;
-			}
-		}
-
-		return DEFAULT_PORT;
+		return loadConfig().port;
 	}
 
 	public async ensureRunning(): Promise<void> {
@@ -64,13 +55,14 @@ export class ServerManager {
 
 		const logFd = openSync(this.logFilePath, 'a');
 		try {
+			const cfg = loadConfig();
 			const child = spawn(process.execPath, [SERVER_BIN_PATH], {
 				detached: true,
 				stdio: ['ignore', logFd, logFd],
 				env: {
-					...process.env,
+					...cfg.serverEnv,
 					PORT: String(targetPort),
-					CAMOFOX_IDLE_TIMEOUT_MS: String(options?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS),
+					CAMOFOX_IDLE_TIMEOUT_MS: String(options?.idleTimeoutMs ?? cfg.idleTimeoutMs),
 				},
 			});
 

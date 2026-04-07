@@ -1,8 +1,8 @@
 /**
- * Centralized environment configuration for camofox-browser.
+ * Primary environment registry for camofox-browser.
  *
- * All process.env access is isolated here so the scanner doesn't
- * flag plugin.ts or server.js for env-harvesting (env + network in same file).
+ * Server-side env reads are centralized here. CLI-only reads (CAMOFOX_API_KEY,
+ * CAMOFOX_CLI_USER) and ambient host reads (DISPLAY) remain at their call sites.
  */
 
 import { join } from 'node:path';
