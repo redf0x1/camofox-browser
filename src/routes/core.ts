@@ -275,6 +275,10 @@ router.post(
 		res: Response,
 	) => {
 		try {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+				return res.status(403).json({ error: 'Forbidden' });
+			}
+
 			const { userId, sessionKey, listItemId, url, preset, locale, timezoneId, geolocation, viewport } = req.body;
 			const resolvedSessionKey = sessionKey || listItemId;
 			if (!userId || !resolvedSessionKey) {
@@ -368,6 +372,10 @@ router.get('/tabs', async (req: Request<unknown, unknown, unknown, { userId?: un
 router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; url?: string; macro?: string; query?: string }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId, url, macro, query } = req.body;
 		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const found = findTabById(tabId, userId);
@@ -443,6 +451,10 @@ router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unkno
 // Wait for page ready
 router.post('/tabs/:tabId/wait', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; timeout?: number; waitForNetwork?: boolean }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId, timeout = 10000, waitForNetwork = true } = req.body;
 		const found = findTabById(req.params.tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -461,6 +473,10 @@ router.post('/tabs/:tabId/wait', async (req: Request<{ tabId: string }, unknown,
 router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; ref?: string; selector?: string }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId, ref, selector } = req.body;
 		if (!userId) return res.status(400).json({ error: 'userId required' });
 		const found = findTabById(tabId, userId);
@@ -495,6 +511,10 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 router.post('/tabs/:tabId/type', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; ref?: string; selector?: string; text?: string }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId, ref, selector, text } = req.body;
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -517,6 +537,10 @@ router.post('/tabs/:tabId/type', async (req: Request<{ tabId: string }, unknown,
 router.post('/tabs/:tabId/press', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; key?: string }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId, key } = req.body;
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -534,6 +558,10 @@ router.post('/tabs/:tabId/press', async (req: Request<{ tabId: string }, unknown
 // Scroll
 router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; direction?: 'up' | 'down'; amount?: number }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId, direction = 'down', amount = 500 } = req.body;
 		const found = findTabById(req.params.tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -570,6 +598,10 @@ router.post(
 	) => {
 		const tabId = req.params.tabId;
 		try {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+				return res.status(403).json({ error: 'Forbidden' });
+			}
+
 			const { userId, selector, ref, deltaX, deltaY, scrollTo } = req.body;
 			const found = findTabById(tabId, userId);
 			if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -711,6 +743,10 @@ router.post(
 router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown, { userId?: unknown }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId } = req.body;
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -729,6 +765,10 @@ router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown,
 router.post('/tabs/:tabId/forward', async (req: Request<{ tabId: string }, unknown, { userId?: unknown }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId } = req.body;
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -747,6 +787,10 @@ router.post('/tabs/:tabId/forward', async (req: Request<{ tabId: string }, unkno
 router.post('/tabs/:tabId/refresh', async (req: Request<{ tabId: string }, unknown, { userId?: unknown }>, res: Response) => {
 	const tabId = req.params.tabId;
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId } = req.body;
 		const found = findTabById(tabId, userId);
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
@@ -837,6 +881,10 @@ router.get('/tabs/:tabId/stats', async (req: Request<{ tabId: string }, unknown,
 // Close tab
 router.delete('/tabs/:tabId', async (req: Request<{ tabId: string }, unknown, { userId?: unknown }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId } = req.body;
 		const found = findTabById(req.params.tabId, userId);
 		if (found) {
@@ -859,6 +907,10 @@ router.delete('/tabs/:tabId', async (req: Request<{ tabId: string }, unknown, { 
 // Close tab group
 router.delete('/tabs/group/:listItemId', async (req: Request<{ listItemId: string }, unknown, { userId?: unknown }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { userId } = req.body;
 		const sessionsForUser = getSessionsForUser(userId);
 		for (const [sessionKey, session] of sessionsForUser) {
@@ -887,6 +939,10 @@ router.delete('/tabs/group/:listItemId', async (req: Request<{ listItemId: strin
 // Close session
 router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const userId = normalizeUserId(req.params.userId);
 		await closeSessionsForUser(userId);
 		// Ensure downloads are cleaned even if the session was already partially removed.
@@ -907,6 +963,10 @@ router.post(
 		res: Response,
 	) => {
 		try {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
+				return res.status(403).json({ error: 'Forbidden' });
+			}
+
 			const userId = normalizeUserId(req.params.userId);
 			const { headless } = req.body ?? {};
 
@@ -1055,6 +1115,10 @@ router.get('/downloads/:downloadId/content', async (req, res) => {
 // Downloads: delete
 router.delete('/downloads/:downloadId', async (req, res) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const userId = (req.body as any)?.userId || (req.query.userId as string);
 		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
 		const deleted = deleteDownload(req.params.downloadId, userId);
@@ -1070,6 +1134,10 @@ router.delete('/downloads/:downloadId', async (req, res) => {
 // Extract resources from a scoped container
 router.post('/tabs/:tabId/extract-resources', async (req, res) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { tabId } = req.params as { tabId: string };
 		const { userId, selector, types, extensions, resolveBlobs, triggerLazyLoad } = req.body as any;
 		if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
@@ -1105,6 +1173,10 @@ router.post('/tabs/:tabId/extract-resources', async (req, res) => {
 // Batch download from a scoped container
 router.post('/tabs/:tabId/batch-download', async (req, res) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { tabId } = req.params as { tabId: string };
 		const body = req.body as any;
 		const userId = body?.userId;

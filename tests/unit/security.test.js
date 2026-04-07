@@ -2,6 +2,16 @@ const { startServer, stopServer, getServerUrl } = require('../helpers/startServe
 const { startTestSite, stopTestSite, getTestSiteUrl } = require('../helpers/testSite');
 const { createClient } = require('../helpers/client');
 
+function makeAuthHeaders(headers = {}) {
+  if (!process.env.CAMOFOX_API_KEY) {
+    return headers;
+  }
+  return {
+    Authorization: `Bearer ${process.env.CAMOFOX_API_KEY}`,
+    ...headers,
+  };
+}
+
 describe('Security', () => {
   let serverUrl;
   let testSiteUrl;
@@ -185,7 +195,7 @@ describe('Security', () => {
     test('POST /tabs/open rejects without userId', async () => {
       const res = await fetch(`${serverUrl}/tabs/open`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: makeAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ url: `${testSiteUrl}/pageA` }),
       });
       expect(res.status).toBe(400);
@@ -196,7 +206,7 @@ describe('Security', () => {
     test('POST /navigate rejects without userId', async () => {
       const res = await fetch(`${serverUrl}/navigate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: makeAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ targetId: 'fake', url: `${testSiteUrl}/pageA` }),
       });
       expect(res.status).toBe(400);
@@ -214,7 +224,7 @@ describe('Security', () => {
     test('POST /act rejects without userId', async () => {
       const res = await fetch(`${serverUrl}/act`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: makeAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ kind: 'click', targetId: 'fake', ref: 'e1' }),
       });
       expect(res.status).toBe(400);
@@ -249,7 +259,7 @@ describe('Security', () => {
       const largeBody = JSON.stringify({ data: 'x'.repeat(200000) });
       const res = await fetch(`${serverUrl}/tabs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: makeAuthHeaders({ 'Content-Type': 'application/json' }),
         body: largeBody,
       });
       expect(res.status).toBe(413);

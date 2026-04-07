@@ -165,13 +165,18 @@ async function fetchApi(
   path: string,
   options: RequestInit = {}
 ): Promise<unknown> {
+  const envCfg = loadConfig();
   const url = `${baseUrl}${path}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string>),
+  };
+  if (envCfg.apiKey) {
+    headers["Authorization"] = `Bearer ${envCfg.apiKey}`;
+  }
   const res = await fetch(url, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -724,9 +729,6 @@ export default function register(api: PluginApi) {
 
       const result = await fetchApi(baseUrl, `/sessions/${encodeURIComponent(userId)}/cookies`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${envCfg.apiKey}`,
-        },
         body: JSON.stringify({ cookies: pwCookies }),
       });
 

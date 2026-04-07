@@ -16,9 +16,17 @@ class BrowserClient {
     const timeoutId = setTimeout(() => controller.abort(), options.timeout || this.timeout);
     
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      };
+      if (process.env.CAMOFOX_API_KEY && !headers.Authorization) {
+        headers.Authorization = `Bearer ${process.env.CAMOFOX_API_KEY}`;
+      }
+
       const fetchOptions = {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         signal: controller.signal
       };
       

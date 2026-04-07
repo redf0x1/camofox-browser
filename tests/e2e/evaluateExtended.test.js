@@ -74,10 +74,10 @@ function makeHeaders(apiKey) {
   return headers;
 }
 
-async function createTab(userId, sessionKey) {
+async function createTab(userId, sessionKey, apiKey) {
   const res = await fetch(`${serverUrl}/tabs`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: makeHeaders(apiKey),
     body: JSON.stringify({ userId, sessionKey }),
   });
   const data = await res.json();
@@ -181,7 +181,7 @@ describe('POST /tabs/:tabId/evaluate-extended with CAMOFOX_API_KEY', () => {
 
   test('returns 200 with valid simple expression', async () => {
     const userId = `eval-simple-${crypto.randomUUID()}`;
-    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`);
+    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`, API_KEY);
 
     const { res, data } = await evaluateExtended(tabId, {
       userId,
@@ -196,7 +196,7 @@ describe('POST /tabs/:tabId/evaluate-extended with CAMOFOX_API_KEY', () => {
 
   test('returns correct resultType for string, number, and object', async () => {
     const userId = `eval-types-${crypto.randomUUID()}`;
-    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`);
+    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`, API_KEY);
 
     const stringResult = await evaluateExtended(tabId, {
       userId,
@@ -213,7 +213,7 @@ describe('POST /tabs/:tabId/evaluate-extended with CAMOFOX_API_KEY', () => {
     expect(numberResult.data.resultType).toBe('number');
 
     const objectUserId = `eval-types-obj-${crypto.randomUUID()}`;
-    const objectTabId = await createTab(objectUserId, `session-${crypto.randomUUID()}`);
+    const objectTabId = await createTab(objectUserId, `session-${crypto.randomUUID()}`, API_KEY);
     const objectResult = await evaluateExtended(objectTabId, {
       userId: objectUserId,
       expression: '({ a: 1, b: "two" })',
@@ -224,7 +224,7 @@ describe('POST /tabs/:tabId/evaluate-extended with CAMOFOX_API_KEY', () => {
 
   test('returns 408 on timeout', async () => {
     const userId = `eval-timeout-${crypto.randomUUID()}`;
-    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`);
+    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`, API_KEY);
 
     const { res, data } = await evaluateExtended(tabId, {
       userId,
@@ -239,7 +239,7 @@ describe('POST /tabs/:tabId/evaluate-extended with CAMOFOX_API_KEY', () => {
 
   test('returns truncated=true for large results', async () => {
     const userId = `eval-truncate-${crypto.randomUUID()}`;
-    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`);
+    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`, API_KEY);
 
     const { res, data } = await evaluateExtended(tabId, {
       userId,
@@ -273,7 +273,7 @@ describe('POST /tabs/:tabId/evaluate-extended with CAMOFOX_API_KEY', () => {
 
   test('existing /evaluate endpoint still works (regression)', async () => {
     const userId = `eval-regression-${crypto.randomUUID()}`;
-    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`);
+    const tabId = await createTab(userId, `session-${crypto.randomUUID()}`, API_KEY);
 
     const res = await fetch(`${serverUrl}/tabs/${tabId}/evaluate`, {
       method: 'POST',

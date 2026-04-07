@@ -7,7 +7,7 @@ import type { Locator } from 'playwright-core';
 
 import { safeError } from '../middleware/errors';
 import { log } from '../middleware/logging';
-import { isAuthorizedWithAdminKey } from '../middleware/auth';
+import { isAuthorizedWithAdminKey, isAuthorizedWithApiKey } from '../middleware/auth';
 import { loadConfig } from '../utils/config';
 import { closeBrowser } from '../services/browser';
 import { contextPool } from '../services/context-pool';
@@ -89,6 +89,10 @@ router.get('/', async (_req: Request, res: Response) => {
 // POST /tabs/open - Open tab (alias for POST /tabs, OpenClaw format)
 router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; userId?: unknown; listItemId?: string }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { url, userId, listItemId = 'default' } = req.body;
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
@@ -161,6 +165,10 @@ router.post('/stop', async (req: Request, res: Response) => {
 // POST /navigate - Navigate (OpenClaw format with targetId in body)
 router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: string; url?: string; userId?: unknown }>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		const { targetId, url, userId } = req.body;
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
@@ -237,6 +245,10 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 // POST /act - Combined action endpoint (OpenClaw format)
 router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown>>, res: Response) => {
 	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
 		interface ActRequestBase {
 			kind: string;
 			targetId: string;
