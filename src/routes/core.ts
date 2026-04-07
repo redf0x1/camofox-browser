@@ -9,12 +9,14 @@ import { log } from '../middleware/logging';
 import { isAuthorizedWithApiKey } from '../middleware/auth';
 import { checkRateLimit } from '../middleware/rate-limit';
 import { loadConfig } from '../utils/config';
-import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
+import { contextHash, getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
 import { contextPool, getDisplayForUser } from '../services/context-pool';
 import { startVnc, stopVnc } from '../services/vnc';
 import {
 	MAX_TABS_PER_SESSION,
+	establishCanonicalProfile,
 	findTabById,
+	getCanonicalProfile,
 	getSession,
 	getSessionMapKey,
 	getSessionsForUser,
@@ -163,7 +165,15 @@ router.post(
 				if (!found) return res.status(404).json({ error: 'Tab not found' });
 				session = found.session;
 			} else {
-				session = await getSession(userId);
+				const canonical = getCanonicalProfile(userId);
+				if (!canonical) {
+					log('warn', 'cookie import rejected: no canonical profile', { userId: String(userId) });
+					return res.status(409).json({
+						error: 'No canonical profile',
+						message: 'Cannot import cookies without an established canonical profile. Create a tab via POST /tabs first.',
+					});
+				}
+				session = await getSession(userId, canonical.resolvedOverrides);
 			}
 			await session.context.addCookies(sanitized as never);
 			const result = { ok: true, userId: String(userId), count: sanitized.length };
@@ -295,6 +305,31 @@ router.post(
 			if (contextOverrides) {
 				const validationError = validateContextOptions(contextOverrides);
 				if (validationError) return res.status(400).json({ error: validationError });
+			}
+
+			const requestHash = contextHash(contextOverrides);
+			const existingProfile = getCanonicalProfile(userId);
+			if (existingProfile) {
+				if (contextOverrides === null) {
+					contextOverrides = existingProfile.resolvedOverrides;
+				} else if (requestHash !== existingProfile.hash) {
+					log('warn', 'canonical profile conflict', { userId: String(userId) });
+					return res.status(409).json({
+						error: 'Context override conflict',
+						message: 'A canonical profile already exists for this user with different overrides. Close the session first to reconfigure.',
+					});
+				} else {
+					contextOverrides = existingProfile.resolvedOverrides;
+				}
+			} else {
+				const established = await establishCanonicalProfile(userId, contextOverrides);
+				if (established.hash !== requestHash) {
+					log('warn', 'canonical profile conflict (concurrent)', { userId: String(userId) });
+					return res.status(409).json({
+						error: 'Context override conflict',
+						message: 'A canonical profile was established concurrently with different overrides. Close the session first to reconfigure.',
+					});
+				}
 			}
 
 			const sessionMapKey = getSessionMapKey(userId, contextOverrides);

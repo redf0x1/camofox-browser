@@ -120,6 +120,19 @@ async function postCookies(userId, cookies, headers = {}) {
   });
 }
 
+async function establishCanonical(userId, headers = {}) {
+  const res = await fetch(`${serverUrl}/tabs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ userId, sessionKey: 'default' }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Failed to establish canonical profile: ${res.status} ${JSON.stringify(data)}`);
+  }
+  return data;
+}
+
 describe('Cookie endpoint - field sanitization', () => {
   beforeAll(async () => {
     await startServerWithApiKey(TEST_API_KEY);
@@ -130,6 +143,10 @@ describe('Cookie endpoint - field sanitization', () => {
   }, 30000);
 
   test('strips unknown fields from cookies', async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    await establishCanonical(userId, {
+      Authorization: `Bearer ${TEST_API_KEY}`,
+    });
     const cookies = [
       {
         name: 'sess',
@@ -140,7 +157,7 @@ describe('Cookie endpoint - field sanitization', () => {
         __proto__: { admin: true },
       },
     ];
-    const res = await postCookies('user1', cookies, {
+    const res = await postCookies(userId, cookies, {
       Authorization: `Bearer ${TEST_API_KEY}`,
     });
     expect(res.status).toBe(200);
@@ -179,6 +196,10 @@ describe('Cookie endpoint - field sanitization', () => {
   });
 
   test('preserves sameSite field', async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    await establishCanonical(userId, {
+      Authorization: `Bearer ${TEST_API_KEY}`,
+    });
     const cookies = [
       {
         name: 'strict',
@@ -188,7 +209,7 @@ describe('Cookie endpoint - field sanitization', () => {
         sameSite: 'Strict',
       },
     ];
-    const res = await postCookies('user1', cookies, {
+    const res = await postCookies(userId, cookies, {
       Authorization: `Bearer ${TEST_API_KEY}`,
     });
     expect(res.status).toBe(200);
@@ -271,6 +292,10 @@ describe('Cookie endpoint - with API key', () => {
   });
 
   test('accepts valid cookies', async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    await establishCanonical(userId, {
+      Authorization: `Bearer ${TEST_API_KEY}`,
+    });
     const cookies = [
       {
         name: 'session_id',
@@ -282,7 +307,7 @@ describe('Cookie endpoint - with API key', () => {
         secure: false,
       },
     ];
-    const res = await postCookies('user1', cookies, {
+    const res = await postCookies(userId, cookies, {
       Authorization: `Bearer ${TEST_API_KEY}`,
     });
     expect(res.status).toBe(200);
@@ -292,12 +317,16 @@ describe('Cookie endpoint - with API key', () => {
   });
 
   test('accepts multiple valid cookies', async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    await establishCanonical(userId, {
+      Authorization: `Bearer ${TEST_API_KEY}`,
+    });
     const cookies = [
       { name: 'a', value: '1', domain: '.example.com', path: '/' },
       { name: 'b', value: '2', domain: '.example.com', path: '/' },
       { name: 'c', value: '3', domain: '.test.com', path: '/' },
     ];
-    const res = await postCookies('user2', cookies, {
+    const res = await postCookies(userId, cookies, {
       Authorization: `Bearer ${TEST_API_KEY}`,
     });
     expect(res.status).toBe(200);
@@ -333,10 +362,12 @@ describe('Cookie endpoint - without API key', () => {
   }, 30000);
 
   test('allows cookie import when CAMOFOX_API_KEY is not set', async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    await establishCanonical(userId);
     const cookies = [
       { name: 'a', value: '1', domain: '.example.com', path: '/' },
     ];
-    const res = await postCookies('user1', cookies);
+    const res = await postCookies(userId, cookies);
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.ok).toBe(true);

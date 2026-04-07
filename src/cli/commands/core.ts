@@ -26,12 +26,12 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const viewport = parseViewport(options.viewport);
-				const response = await context.getTransport().post<{ tabId?: string; targetId?: string }>('/tabs/open', {
+				const response = await context.getTransport().post<{ tabId?: string; targetId?: string }>('/tabs', {
 					url,
 					userId,
-					listItemId: 'default',
+					sessionKey: 'default',
 					viewport,
-					geoPreset: options.geo,
+					preset: options.geo,
 				});
 
 				const tabId = (response.data as { tabId?: string; targetId?: string }).tabId ?? (response.data as { targetId?: string }).targetId;

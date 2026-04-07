@@ -4,6 +4,8 @@ import type { ContextOverrides, SessionData, TabState } from '../types';
 import { log } from '../middleware/logging';
 import { clearTabLock, clearAllTabLocks } from './tab';
 import { loadConfig } from '../utils/config';
+import type { ResolvedContextOptions } from '../utils/presets';
+import { contextHash } from '../utils/presets';
 import { contextPool } from './context-pool';
 import { cleanupUserDownloads } from './download';
 import { decrementActiveOps, incrementActiveOps } from './health';
@@ -23,6 +25,19 @@ const launchingSessions = new Map<string, Promise<SessionData>>();
 // tabId -> sessions map key
 // Persistent profiles are keyed only by userId, while tab endpoints only get tabId.
 const tabSessionIndex = new Map<string, string>();
+
+export interface CanonicalProfile {
+	resolvedOverrides: ResolvedContextOptions | null;
+	hash: string;
+	establishedAt: number;
+}
+
+// Canonical per-user profile: stores resolved overrides from the first core POST /tabs.
+// Survives passive context eviction; cleared only on explicit session close/cleanup.
+const canonicalProfiles = new Map<string, CanonicalProfile>();
+
+// Per-user establishment lock to serialize first-profile creation.
+const profileEstablishmentLocks = new Map<string, Promise<CanonicalProfile>>();
 
 const userConcurrency = new Map<string, { active: number; queue: Array<() => void> }>();
 
@@ -90,39 +105,43 @@ export async function withUserLimit<T>(
 	}
 }
 
-function cleanupSessionsForUserId(userId: string, reason: string): void {
-	const prefix = normalizeUserId(userId);
+function cleanupSessionsForUserId(userId: string, reason: string, clearCanonical = true): void {
+	const key = normalizeUserId(userId);
 	// If a session is currently being created, drop our reference so callers don't keep a stale placeholder.
-	launchingSessions.delete(prefix);
-	void stopVnc(prefix).catch(() => {});
+	launchingSessions.delete(key);
+	void stopVnc(key).catch(() => {});
 
 	try {
-		cleanupUserDownloads(prefix);
+		cleanupUserDownloads(key);
 	} catch {
 		// ignore cleanup errors
 	}
 
-	cleanupTracing(prefix);
+	cleanupTracing(key);
 
-	for (const [key, session] of sessions) {
-		if (key === prefix || key.startsWith(prefix + ':')) {
-			unindexSessionTabs(session);
-			sessions.delete(key);
-			log('info', 'session cleaned up', { userId: key, reason });
-		}
+	const session = sessions.get(key);
+	if (session) {
+		unindexSessionTabs(session);
+		sessions.delete(key);
+		log('info', 'session cleaned up', { userId: key, reason });
 	}
 
-	userConcurrency.delete(prefix);
+	if (clearCanonical) {
+		canonicalProfiles.delete(key);
+		profileEstablishmentLocks.delete(key);
+	}
+
+	userConcurrency.delete(key);
 }
 
 contextPool.onEvict((userId) => {
-	cleanupSessionsForUserId(userId, 'context_evicted');
+	cleanupSessionsForUserId(userId, 'context_evicted', false);
 	// Note: the pool will close the context; session cleanup only removes dead Page references.
 });
 
-export const SESSION_TIMEOUT_MS = Math.max(60000, Number.parseInt(process.env.CAMOFOX_SESSION_TIMEOUT || '', 10) || 1800000);
-export const MAX_SESSIONS = Math.max(1, Number.parseInt(process.env.CAMOFOX_MAX_SESSIONS || '', 10) || 50);
-export const MAX_TABS_PER_SESSION = Math.max(1, Number.parseInt(process.env.CAMOFOX_MAX_TABS || '', 10) || 10);
+export const SESSION_TIMEOUT_MS = CONFIG.sessionTimeoutMs;
+export const MAX_SESSIONS = CONFIG.maxSessions;
+export const MAX_TABS_PER_SESSION = CONFIG.maxTabsPerSession;
 
 export function normalizeUserId(userId: unknown): string {
 	return String(userId);
@@ -134,14 +153,58 @@ export function getSessionMapKey(userId: unknown, contextOverrides: ContextOverr
 	return normalizeUserId(userId);
 }
 
+export function getCanonicalProfile(userId: unknown): CanonicalProfile | undefined {
+	return canonicalProfiles.get(normalizeUserId(userId));
+}
+
+export function hasCanonicalProfile(userId: unknown): boolean {
+	return canonicalProfiles.has(normalizeUserId(userId));
+}
+
+export async function establishCanonicalProfile(
+	userId: unknown,
+	resolved: ResolvedContextOptions | null,
+): Promise<CanonicalProfile> {
+	const key = normalizeUserId(userId);
+	const existing = canonicalProfiles.get(key);
+	if (existing) return existing;
+
+	const pending = profileEstablishmentLocks.get(key);
+	if (pending) return pending;
+
+	const promise = (async (): Promise<CanonicalProfile> => {
+		const recheck = canonicalProfiles.get(key);
+		if (recheck) return recheck;
+
+		const profile: CanonicalProfile = {
+			resolvedOverrides: resolved,
+			hash: contextHash(resolved),
+			establishedAt: Date.now(),
+		};
+		canonicalProfiles.set(key, profile);
+		log('info', 'canonical profile established', { userId: key, hash: profile.hash });
+		return profile;
+	})();
+
+	profileEstablishmentLocks.set(key, promise);
+	try {
+		return await promise;
+	} finally {
+		profileEstablishmentLocks.delete(key);
+	}
+}
+
+export function clearCanonicalProfile(userId: unknown): void {
+	const key = normalizeUserId(userId);
+	canonicalProfiles.delete(key);
+	profileEstablishmentLocks.delete(key);
+}
+
 export function getSessionsForUser(userId: unknown): Array<[string, SessionData]> {
 	if (userId === undefined || userId === null) return [];
-	const prefix = normalizeUserId(userId);
-	const out: Array<[string, SessionData]> = [];
-	for (const [key, session] of sessions) {
-		if (key === prefix || key.startsWith(prefix + ':')) out.push([key, session]);
-	}
-	return out;
+	const key = normalizeUserId(userId);
+	const session = sessions.get(key);
+	return session ? [[key, session]] : [];
 }
 
 export function getAllSessions(): Map<string, SessionData> {
@@ -197,11 +260,11 @@ export function findTabById(
 		})
 	| null {
 	if (userId === undefined || userId === null) return null;
-	const prefix = normalizeUserId(userId);
+	const key = normalizeUserId(userId);
 
 	const indexedKey = tabSessionIndex.get(tabId);
 	if (indexedKey) {
-		if (!(indexedKey === prefix || indexedKey.startsWith(prefix + ':'))) {
+		if (indexedKey !== key) {
 			return null;
 		}
 
@@ -214,13 +277,13 @@ export function findTabById(
 		tabSessionIndex.delete(tabId);
 	}
 
-	for (const [sessionKey, session] of sessions) {
-		if (!(sessionKey === prefix || sessionKey.startsWith(prefix + ':'))) continue;
-		const found = findTab(session, tabId);
-		if (found) {
-			tabSessionIndex.set(tabId, sessionKey);
-			return { sessionKey, session, ...found };
-		}
+	const session = sessions.get(key);
+	if (!session) return null;
+
+	const found = findTab(session, tabId);
+	if (found) {
+		tabSessionIndex.set(tabId, key);
+		return { sessionKey: key, session, ...found };
 	}
 
 	return null;
@@ -300,14 +363,16 @@ export function unindexTab(tabId: string): void {
 export function clearAllState(): void {
 	sessions.clear();
 	tabSessionIndex.clear();
+	canonicalProfiles.clear();
+	profileEstablishmentLocks.clear();
 	clearAllTabLocks();
 	userConcurrency.clear();
 }
 
 export async function closeSessionsForUser(userId: string): Promise<void> {
-	const prefix = userId;
-	await contextPool.closeContext(prefix).catch(() => {});
-	cleanupSessionsForUserId(prefix, 'explicit_close');
+	const key = normalizeUserId(userId);
+	await contextPool.closeContext(key).catch(() => {});
+	cleanupSessionsForUserId(key, 'explicit_close');
 }
 
 export async function closeAllSessions(): Promise<void> {
@@ -324,6 +389,8 @@ export async function closeAllSessions(): Promise<void> {
 		}
 	}
 	launchingSessions.clear();
+	canonicalProfiles.clear();
+	profileEstablishmentLocks.clear();
 }
 
 let cleanupInterval: NodeJS.Timeout | null = null;

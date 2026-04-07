@@ -17,6 +17,7 @@ import {
 	clearAllState,
 	countTotalTabsForSessions,
 	findTabById,
+	getCanonicalProfile,
 	getSession,
 	getSessionMapKey,
 	getTabGroup,
@@ -104,8 +105,17 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		const urlErr = validateUrl(url);
 		if (urlErr) return res.status(400).json({ error: urlErr });
 
-		const sessionMapKey = getSessionMapKey(userId, null);
-		const session = await getSession(userId);
+		const canonical = getCanonicalProfile(userId);
+		if (!canonical) {
+			log('warn', 'openclaw tab open rejected: no canonical profile', { userId: String(userId) });
+			return res.status(409).json({
+				error: 'No canonical profile',
+				message: 'Cannot open tabs via this endpoint without an established canonical profile. Use core POST /tabs first.',
+			});
+		}
+
+		const sessionMapKey = getSessionMapKey(userId, canonical.resolvedOverrides);
+		const session = await getSession(userId, canonical.resolvedOverrides);
 
 		const totalTabs = countTotalTabsForSessions([[sessionMapKey, session]]);
 		if (totalTabs >= MAX_TABS_PER_SESSION) {
