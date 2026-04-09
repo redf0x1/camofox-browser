@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
 import { log } from '../middleware/logging';
+import { loadConfig } from '../utils/config';
 
 interface VncSession {
 	userId: string;
@@ -16,10 +17,11 @@ interface VncSession {
 }
 
 const vncSessions = new Map<string, VncSession>();
-const VNC_TIMEOUT_MS = Math.max(10_000, Number.parseInt(process.env.CAMOFOX_VNC_TIMEOUT_MS || '', 10) || 120_000);
+const CONFIG = loadConfig();
+const VNC_TIMEOUT_MS = CONFIG.vncTimeoutMs;
 const NOVNC_PATH = '/opt/noVNC';
-const BASE_WS_PORT = Math.max(1, Number.parseInt(process.env.CAMOFOX_VNC_BASE_PORT || '', 10) || 6080);
-const VNC_HOST = process.env.CAMOFOX_VNC_HOST || 'localhost';
+const BASE_WS_PORT = CONFIG.vncBasePort;
+const VNC_HOST = CONFIG.vncHost;
 
 export function getVncSession(userId: string): VncSession | undefined {
 	return vncSessions.get(String(userId));

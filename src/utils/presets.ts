@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { GeolocationConfig, PresetConfig, ViewportConfig } from '../types';
+import { loadConfig } from './config';
+
+const CONFIG_PRESETS = loadConfig();
 
 // Built-in preset definitions
 export const BUILT_IN_PRESETS: Record<string, PresetConfig> = {
@@ -246,4 +249,4 @@ export function contextHash(opts: ResolvedContextOptions | null): string {
 }
 
 // Load custom presets on module load
-loadCustomPresets(process.env.CAMOFOX_PRESETS_FILE);
+loadCustomPresets(CONFIG_PRESETS.presetsFile);

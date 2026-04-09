@@ -5,15 +5,20 @@ import { type ChildProcess, spawn } from 'node:child_process';
 
 import { launchOptions } from 'camoufox-js';
 import { generateFingerprint } from 'camoufox-js/dist/fingerprints.js';
+// camoufox-js does not export version info from its public API.
+// This deep import is the only way to detect the installed engine version.
+// If it breaks on upgrade, getInstalledCamoufoxVersion() catches and returns 'unknown'.
+import { installedVerStr } from 'camoufox-js/dist/pkgman.js';
 import { type Fingerprint } from 'fingerprint-generator';
 import { firefox, type BrowserContext, type BrowserContextOptions } from 'playwright-core';
 
 import { loadConfig } from '../utils/config';
+import { readVersionedSidecar, writeVersionedSidecar } from '../utils/sidecar-version';
 import { log } from '../middleware/logging';
 
 const CONFIG = loadConfig();
 
-const MAX_CONTEXTS = Math.max(1, Number.parseInt(process.env.CAMOFOX_MAX_SESSIONS || '', 10) || 50);
+const MAX_CONTEXTS = CONFIG.maxSessions;
 
 type PersistentContextOptions = NonNullable<Parameters<typeof firefox.launchPersistentContext>[1]>;
 
@@ -42,6 +47,14 @@ function buildProxyConfig(): { server: string; username?: string; password?: str
 		username: username || undefined,
 		password: password || undefined,
 	};
+}
+
+function getInstalledCamoufoxVersion(): string {
+	try {
+		return installedVerStr();
+	} catch {
+		return 'unknown';
+	}
 }
 
 function profileDirForUserId(userId: string): string {
@@ -198,6 +211,47 @@ export class ContextPool {
 
 		const profileDir = profileDirForUserId(userId);
 		fs.mkdirSync(profileDir, { recursive: true });
+		const compatPath = path.join(profileDir, 'compatibility.json');
+
+		try {
+			const currentVersion = getInstalledCamoufoxVersion();
+			if (currentVersion === 'unknown') {
+				throw new Error(
+					`Cannot verify profile compatibility for user "${userId}": installed Camoufox version could not be determined. ` +
+					`Resolve the camoufox-js installation or delete the profile directory to reset: ${profileDir}`,
+				);
+			}
+
+			const compat = readVersionedSidecar<{ camoufoxVersion: string; createdAt: string }>(compatPath, {
+				currentVersion: 1,
+				migrations: {},
+				label: 'profile compatibility',
+			});
+
+			if (compat) {
+				if (compat.camoufoxVersion === 'unknown') {
+					throw new Error(
+						`Profile for user "${userId}" has unknown version provenance and cannot be verified. Delete the profile directory to reset: ${profileDir}`,
+					);
+				}
+				if (compat.camoufoxVersion !== currentVersion) {
+					throw new Error(
+						`Profile for user "${userId}" was created with Camoufox ${compat.camoufoxVersion}, but the current version is ${currentVersion}. Delete the profile directory to reset: ${profileDir}`,
+					);
+				}
+			} else {
+				writeVersionedSidecar(compatPath, 1, {
+					camoufoxVersion: currentVersion,
+					createdAt: new Date().toISOString(),
+				});
+			}
+		} catch (err) {
+			throw err instanceof Error
+				? err
+				: new Error(
+					`Profile compatibility check failed for user "${userId}": ${String(err)}. Delete the profile directory to reset: ${profileDir}`,
+				);
+		}
 
 		let effectiveHeadless: boolean = headless === true;
 		let virtualDisplay: any = undefined;
@@ -245,25 +299,28 @@ export class ContextPool {
 			const fpPath = path.join(profileDir, 'fingerprint.json');
 			let fingerprint: Fingerprint | undefined;
 
-			if (fs.existsSync(fpPath)) {
-				try {
-					const parsed = JSON.parse(fs.readFileSync(fpPath, 'utf-8'));
-					if (parsed && typeof parsed === 'object') {
-						fingerprint = parsed as Fingerprint;
-						log('info', 'loaded persisted fingerprint', { userId, fpPath });
-					} else {
-						log('warn', 'persisted fingerprint is invalid, regenerating', { userId, fpPath });
-					}
-				} catch {
-					log('warn', 'failed to read persisted fingerprint, regenerating', { userId, fpPath });
+			try {
+				const persistedFingerprint = readVersionedSidecar<Fingerprint>(fpPath, {
+					currentVersion: 1,
+					migrations: {
+						0: (raw) => raw as Fingerprint,
+					},
+					label: 'fingerprint sidecar',
+				});
+				fingerprint = persistedFingerprint ?? undefined;
+				if (fingerprint) {
+					log('info', 'loaded persisted fingerprint', { userId, fpPath });
 				}
+			} catch (err) {
+				throw err instanceof Error
+					? err
+					: new Error(`Fingerprint sidecar failed for user "${userId}": ${String(err)}. Delete ${fpPath} to reset.`);
 			}
 
 			if (!fingerprint) {
 				fingerprint = generateFingerprint(undefined, { operatingSystems: [hostOS] });
 				try {
-					fs.mkdirSync(path.dirname(fpPath), { recursive: true });
-					fs.writeFileSync(fpPath, JSON.stringify(fingerprint, null, 2), 'utf-8');
+					writeVersionedSidecar(fpPath, 1, fingerprint);
 					log('info', 'generated new fingerprint and persisted it', { userId, fpPath });
 				} catch {
 					log('warn', 'generated new fingerprint but failed to persist it', { userId, fpPath });

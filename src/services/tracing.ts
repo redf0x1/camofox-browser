@@ -1,12 +1,12 @@
 import { mkdirSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import type { BrowserContext } from 'playwright-core';
+import { loadConfig } from '../utils/config';
 
-const TRACES_DIR = process.env.CAMOFOX_TRACES_DIR || join(homedir(), '.camofox', 'traces');
-
-const MAX_TRACE_DURATION = Number.parseInt(process.env.CAMOFOX_TRACE_MAX_DURATION_MS || '300000', 10);
+const CONFIG = loadConfig();
+const TRACES_DIR = CONFIG.tracesDir;
+const MAX_TRACE_DURATION = CONFIG.traceMaxDurationMs;
 
 interface TracingState {
 	active: boolean;

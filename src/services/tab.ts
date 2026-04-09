@@ -2,6 +2,7 @@ import type { Locator, Page } from 'playwright-core';
 
 import { isElementRef as isSelectorElementRef } from '../cli/utils/selector';
 import { expandMacro } from '../utils/macros';
+import { loadConfig } from '../utils/config';
 import type {
 	ConsoleEntry,
 	EvaluateResult,
@@ -14,6 +15,7 @@ import type {
 import { log } from '../middleware/logging';
 
 const ALLOWED_URL_SCHEMES: ReadonlyArray<'http:' | 'https:'> = ['http:', 'https:'];
+const CONFIG = loadConfig();
 
 // Selective set of actionable roles worth indexing as refs.
 const INTERACTIVE_ROLES: ReadonlyArray<string> = [
@@ -41,21 +43,14 @@ const INTERACTIVE_ROLES: ReadonlyArray<string> = [
 // Patterns to skip (date pickers, calendar widgets)
 const SKIP_PATTERNS: ReadonlyArray<RegExp> = [/date/i, /calendar/i, /picker/i, /datepicker/i];
 
-const DEFAULT_MAX_SNAPSHOT_NODES = 2000;
-const parsedMaxSnapshotNodes = Number.parseInt(
-	process.env.CAMOFOX_MAX_SNAPSHOT_NODES || String(DEFAULT_MAX_SNAPSHOT_NODES),
-	10,
-);
-const MAX_SNAPSHOT_NODES = Number.isFinite(parsedMaxSnapshotNodes) && parsedMaxSnapshotNodes > 0
-	? parsedMaxSnapshotNodes
-	: DEFAULT_MAX_SNAPSHOT_NODES;
+const MAX_SNAPSHOT_NODES = CONFIG.maxSnapshotNodes;
 
 const MAX_EVAL_TIMEOUT = 300000;
 const DEFAULT_EVAL_TIMEOUT = 5000;
 const MAX_EVAL_EXTENDED_TIMEOUT = 300000;
 const DEFAULT_EVAL_EXTENDED_TIMEOUT = 30000;
 const MAX_RESULT_SIZE = 1048576; // 1MB
-const CONSOLE_BUFFER_SIZE = Math.max(100, parseInt(process.env.CAMOFOX_CONSOLE_BUFFER_SIZE || '1000', 10));
+const CONSOLE_BUFFER_SIZE = CONFIG.consoleBufferSize;
 
 export const LONG_TEXT_THRESHOLD = 400;
 export const TYPE_TIMEOUT_BASE_MS = 10000;
@@ -495,6 +490,7 @@ export async function snapshotTab(tabState: TabState): Promise<{ url: string; sn
 		refsCount: tabState.refs.size,
 	};
 }
+
 
 export async function clickTab(tabId: string, tabState: TabState, params: { ref?: string; selector?: string }): Promise<{ ok: true; url: string }>{
 	const { ref, selector } = params;

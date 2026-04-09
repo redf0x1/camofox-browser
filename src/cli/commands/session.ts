@@ -12,6 +12,7 @@ import { atomicWrite } from '../utils/fs-helpers';
 import { resolveTabId } from '../utils/session-resolver';
 
 type SessionFilePayload = {
+	version: 1;
 	sessionName: string;
 	userId: string;
 	tabId: string;
@@ -69,19 +70,46 @@ async function getCookiesForTab(context: CliContext, tabId: string, userId: stri
 function readSessionFile(sessionName: string): SessionFilePayload {
 	ensureSessionsDir();
 	const filePath = getSessionFilePath(sessionName);
-	const raw = readFileSync(filePath, 'utf8');
-	const data = JSON.parse(raw) as SessionFilePayload | unknown[];
-	if (Array.isArray(data)) {
+
+	const content = readFileSync(filePath, 'utf8');
+
+	let raw: unknown;
+	try {
+		raw = JSON.parse(content);
+	} catch (err) {
+		throw new Error(
+			`Corrupt session file "${sessionName}": ${err instanceof Error ? err.message : String(err)}. Delete ${filePath} to reset.`,
+		);
+	}
+
+	if (Array.isArray(raw)) {
 		return {
+			version: 1,
 			sessionName,
 			userId: '',
 			tabId: '',
 			savedAt: new Date().toISOString(),
-			cookies: data,
+			cookies: raw,
 		};
 	}
+
+	if (!raw || typeof raw !== 'object') {
+		throw new Error(
+			`Invalid session file "${sessionName}": expected JSON object or array. Delete ${filePath} to reset.`,
+		);
+	}
+
+	const data = raw as Record<string, unknown>;
+	const version = typeof data.version === 'number' ? data.version : 0;
+	if (version > 1) {
+		throw new Error(
+			`Session file "${sessionName}" uses version ${version}, but this build only supports up to version 1. Upgrade camofox-browser or delete ${filePath} to reset.`,
+		);
+	}
+
 	const cookies = Array.isArray(data.cookies) ? data.cookies : [];
 	return {
+		version: 1,
 		sessionName,
 		userId: typeof data.userId === 'string' ? data.userId : '',
 		tabId: typeof data.tabId === 'string' ? data.tabId : '',
@@ -95,7 +123,8 @@ function readSessionFile(sessionName: string): SessionFilePayload {
 function writeSessionFile(payload: SessionFilePayload): string {
 	ensureSessionsDir();
 	const filePath = getSessionFilePath(payload.sessionName);
-	atomicWrite(filePath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+	const withVersion = { ...payload, version: 1 as const };
+	atomicWrite(filePath, `${JSON.stringify(withVersion, null, 2)}\n`, { mode: 0o600 });
 	return filePath;
 }
 
@@ -120,6 +149,7 @@ export function registerSessionCommands(program: Command, context: CliContext): 
 				const cookies = await getCookiesForTab(context, tabId, userId);
 				const savedAt = new Date().toISOString();
 				const filePath = writeSessionFile({
+					version: 1,
 					sessionName,
 					userId,
 					tabId,
