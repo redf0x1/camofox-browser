@@ -1,6 +1,11 @@
 # Changelog
 
-## [2.2.0] - Unreleased
+## [2.2.1] - Unreleased
+
+### Changed
+- Version bump for release-prep (v2.2.0 tag exists; this patch carries final release framing)
+
+## [2.2.0] - 2026-04-09
 
 ### Upgrade Notes
 - **Local-state sidecar versioning** introduces fail-closed compatibility checks. If local state files are incompatible with the running version, the server will refuse to start the affected session and log an error with the specific path to delete. For sidecar metadata files, only the indicated file needs removal. For profile-level incompatibilities (e.g., Camoufox engine version mismatch), the error may indicate deleting the entire profile directory — follow the error message guidance.
