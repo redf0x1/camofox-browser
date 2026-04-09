@@ -131,20 +131,11 @@ export function registerInteractionCommands(program: Command, context: CliContex
 						if (!(error instanceof HttpError) || error.status !== 404) {
 							throw error;
 						}
-
-						if (direction === 'left' || direction === 'right') {
-							const delta = direction === 'left' ? -Math.abs(amount ?? 500) : Math.abs(amount ?? 500);
-							await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/evaluate`, {
-								userId,
-								expression: `window.scrollBy(${delta}, 0); true;`,
-							});
-						} else {
-							await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/scroll`, {
-								userId,
-								direction,
-								amount,
-							});
-						}
+						await context.getTransport().post(`/tabs/${encodeURIComponent(tabId)}/scroll`, {
+							userId,
+							direction,
+							amount,
+						});
 					}
 
 					context.print(command, { ok: true, direction, amount: amount ?? null });

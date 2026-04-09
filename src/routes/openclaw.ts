@@ -11,6 +11,7 @@ import { isAuthorizedWithAdminKey, isAuthorizedWithApiKey } from '../middleware/
 import { loadConfig } from '../utils/config';
 import { closeBrowser } from '../services/browser';
 import { contextPool } from '../services/context-pool';
+import { registerDownloadListener } from '../services/download';
 import {
 	MAX_TABS_PER_SESSION,
 	closeAllSessions,
@@ -129,6 +130,7 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		const tabState = createTabState(page);
 		group.set(tabId, tabState);
 		indexTab(tabId, sessionMapKey);
+		registerDownloadListener(tabId, String(userId), page);
 
 		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 		tabState.visitedUrls.add(url);
@@ -174,22 +176,19 @@ router.post('/stop', async (req: Request, res: Response) => {
 });
 
 // POST /navigate - Navigate (OpenClaw format with targetId in body)
-router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: string; url?: string; userId?: unknown }>, res: Response) => {
+router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: string; url?: string; macro?: string; query?: string; userId?: unknown }>, res: Response) => {
 	try {
 		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
 
-		const { targetId, url, userId } = req.body;
+		const { targetId, url, macro, query, userId } = req.body;
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
 		}
-		if (!url) {
-			return res.status(400).json({ error: 'url is required' });
+		if (!url && !macro) {
+			return res.status(400).json({ error: 'url or macro required' });
 		}
-
-		const urlErr = validateUrl(url);
-		if (urlErr) return res.status(400).json({ error: urlErr });
 
 		const found = findTabById(String(targetId), userId);
 		if (!found) {
@@ -202,17 +201,28 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
 			withTimeout(
 				withTabLock(String(targetId), async () => {
-					await tabState.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-					tabState.visitedUrls.add(url);
+					let targetUrl = url;
+					if (macro) {
+						const { expandMacro } = await import('../utils/macros');
+						targetUrl = expandMacro(macro, query) || url;
+					}
+					if (!targetUrl) return { status: 400 as const, body: { error: 'url or macro required' } };
+
+					const urlErr = validateUrl(targetUrl);
+					if (urlErr) return { status: 400 as const, body: { error: urlErr } };
+
+					await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					tabState.visitedUrls.add(targetUrl);
 					tabState.refs = await buildRefs(tabState.page);
-					return { ok: true, targetId, url: tabState.page.url() };
+					return { status: 200 as const, body: { ok: true, targetId, url: tabState.page.url() } };
 				}),
 				CONFIG.handlerTimeoutMs,
 				'openclaw-navigate',
 			),
 		);
 
-		return res.json(result);
+		if (result.status !== 200) return res.status(result.status).json(result.body);
+		return res.json(result.body);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'openclaw navigate failed', { reqId: req.reqId, error: message });
@@ -295,7 +305,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 		interface ActScrollRequest extends ActRequestBase {
 			kind: 'scroll' | 'scrollIntoView';
 			ref?: string;
-			direction?: 'up' | 'down';
+			direction?: 'up' | 'down' | 'left' | 'right';
 			amount?: number;
 		}
 		interface ActHoverRequest extends ActRequestBase {
@@ -433,8 +443,9 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 						if (!locator) throw new Error(`Unknown ref: ${ref}`);
 						await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
 					} else {
-						const delta = direction === 'up' ? -amount : amount;
-						await tabState.page.mouse.wheel(0, delta);
+						const isHorizontal = direction === 'left' || direction === 'right';
+						const delta = direction === 'up' || direction === 'left' ? -amount : amount;
+						await tabState.page.mouse.wheel(isHorizontal ? delta : 0, isHorizontal ? 0 : delta);
 					}
 					await tabState.page.waitForTimeout(300);
 					return { ok: true, targetId };

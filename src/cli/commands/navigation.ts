@@ -29,11 +29,18 @@ export function registerNavigationCommands(program: Command, context: CliContext
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
-				await context.getTransport().post('/navigate', {
-					targetId: tabId,
-					userId,
-					url,
-				});
+
+				let body: Record<string, string>;
+				if (url.startsWith('@')) {
+					const spaceIdx = url.indexOf(' ');
+					const macro = spaceIdx === -1 ? url : url.slice(0, spaceIdx);
+					const query = spaceIdx === -1 ? '' : url.slice(spaceIdx + 1);
+					body = { targetId: tabId, userId, macro, query };
+				} else {
+					body = { targetId: tabId, userId, url };
+				}
+
+				await context.getTransport().post('/navigate', body);
 				context.print(command, { ok: true, tabId, url });
 			} catch (error) {
 				context.handleError(error);
@@ -41,7 +48,7 @@ export function registerNavigationCommands(program: Command, context: CliContext
 		})
 		.addHelpText(
 			'after',
-			`\nExamples:\n  $ camofox navigate https://example.com\n  $ camofox screenshot --output page.png\n`,
+			`\nExamples:\n  $ camofox navigate https://example.com\n  $ camofox navigate "@google_search weather today"\n`,
 		);
 
 	program

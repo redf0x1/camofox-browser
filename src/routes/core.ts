@@ -671,7 +671,7 @@ router.post('/tabs/:tabId/press', async (req: Request<{ tabId: string }, unknown
 });
 
 // Scroll
-router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; direction?: 'up' | 'down'; amount?: number }>, res: Response) => {
+router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknown, { userId?: unknown; direction?: 'up' | 'down' | 'left' | 'right'; amount?: number }>, res: Response) => {
 	try {
 		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req, CONFIG.apiKey)) {
 			return res.status(403).json({ error: 'Forbidden' });
@@ -682,8 +682,9 @@ router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknow
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const delta = direction === 'up' ? -amount : amount;
-		await tabState.page.mouse.wheel(0, delta);
+		const isHorizontal = direction === 'left' || direction === 'right';
+		const delta = direction === 'up' || direction === 'left' ? -amount : amount;
+		await tabState.page.mouse.wheel(isHorizontal ? delta : 0, isHorizontal ? 0 : delta);
 		await tabState.page.waitForTimeout(300);
 		return res.json({ ok: true });
 	} catch (err) {

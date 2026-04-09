@@ -609,4 +609,42 @@ describe('Session invariants', () => {
     expect(cookieResponse.res.status).toBe(409);
     expect(cookieResponse.data.error).toBe('No canonical profile');
   });
+
+  test('openclaw /tabs/open captures native downloads triggered on initial navigation', async () => {
+    const userId = trackUser('oc-download');
+
+    // Step 1: Establish canonical profile via core
+    const canonical = await postJson(serverUrl, '/tabs', {
+      userId,
+      sessionKey: 'default',
+      url: `${testSiteUrl}/pageA`,
+    });
+    expect(canonical.res.status).toBe(200);
+
+    // Step 2: Open tab via OpenClaw pointing to download fixture.
+    // Playwright may throw "Download is starting" on direct-attachment
+    // navigation, but the download listener fires regardless.
+    await postJson(serverUrl, '/tabs/open', {
+      userId,
+      url: `${testSiteUrl}/download-file`,
+    }).catch(() => {});
+
+    // Step 3: Poll user-level downloads endpoint (avoids depending on tab state)
+    let downloads = [];
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const dlRes = await getJson(serverUrl, `/users/${encodeURIComponent(userId)}/downloads`);
+      if (dlRes.res.status === 200 && dlRes.data?.downloads?.length > 0) {
+        downloads = dlRes.data.downloads;
+        if (downloads.some(d => d.status === 'completed')) break;
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Step 4: Assert download was captured
+    expect(downloads.length).toBeGreaterThanOrEqual(1);
+    const dl = downloads.find(d => d.status === 'completed');
+    expect(dl).toBeDefined();
+    expect(dl.suggestedFilename).toBe('test-download.bin');
+  }, 30000);
 });

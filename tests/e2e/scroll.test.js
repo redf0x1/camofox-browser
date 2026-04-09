@@ -78,4 +78,50 @@ describe('Scroll', () => {
       await client.cleanup();
     }
   });
+
+  test('scroll left and right (horizontal)', async () => {
+    const client = createClient(serverUrl);
+
+    try {
+      const { tabId } = await client.createTab(`${testSiteUrl}/scroll-horizontal`);
+
+      await client.click(tabId, { selector: '#container' });
+
+      const before = await client.request('POST', `/tabs/${tabId}/evaluate`, {
+        userId: client.userId,
+        expression: 'document.getElementById("container").scrollLeft'
+      });
+      expect(before.ok).toBe(true);
+      expect(before.result).toBe(0);
+
+      const rightResult = await client.scroll(tabId, {
+        direction: 'right',
+        amount: 300
+      });
+      expect(rightResult.ok).toBe(true);
+
+      const afterRight = await client.request('POST', `/tabs/${tabId}/evaluate`, {
+        userId: client.userId,
+        expression: 'document.getElementById("container").scrollLeft'
+      });
+      expect(afterRight.ok).toBe(true);
+      expect(afterRight.result).toBeGreaterThan(before.result);
+
+      const leftResult = await client.scroll(tabId, {
+        direction: 'left',
+        amount: 200
+      });
+      expect(leftResult.ok).toBe(true);
+
+      const afterLeft = await client.request('POST', `/tabs/${tabId}/evaluate`, {
+        userId: client.userId,
+        expression: 'document.getElementById("container").scrollLeft'
+      });
+      expect(afterLeft.ok).toBe(true);
+      expect(afterLeft.result).toBeLessThan(afterRight.result);
+      expect(afterLeft.result).toBeGreaterThanOrEqual(0);
+    } finally {
+      await client.cleanup();
+    }
+  });
 });

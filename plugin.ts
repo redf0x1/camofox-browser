@@ -32,7 +32,7 @@ interface PluginConfig {
 }
 
 interface ToolResult {
-  content: Array<{ type: string; text: string }>;
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 }
 
 interface HealthCheckResult {
@@ -49,16 +49,16 @@ interface ServerHealth {
   sessions?: number;
 }
 
+interface CliCommandBuilder {
+  description: (desc: string) => CliCommandBuilder;
+  option: (flags: string, desc: string, defaultValue?: string) => CliCommandBuilder;
+  argument: (name: string, desc: string) => CliCommandBuilder;
+  action: <TArgs extends unknown[]>(handler: (...args: TArgs) => void | Promise<void>) => CliCommandBuilder;
+  command: (name: string) => CliCommandBuilder;
+}
+
 interface CliContext {
-  program: {
-    command: (name: string) => {
-      description: (desc: string) => CliContext["program"];
-      option: (flags: string, desc: string, defaultValue?: string) => CliContext["program"];
-      argument: (name: string, desc: string) => CliContext["program"];
-      action: (handler: (...args: unknown[]) => void | Promise<void>) => CliContext["program"];
-      command: (name: string) => CliContext["program"];
-    };
-  };
+  program: CliCommandBuilder;
   config: PluginConfig;
   logger: {
     info: (msg: string) => void;
@@ -120,7 +120,12 @@ async function startServer(
   log: PluginApi["log"]
 ): Promise<ChildProcess> {
   const cfg = loadConfig();
-  const proc = launchServer({ pluginDir, port, env: cfg.serverEnv, log });
+  const proc = launchServer({
+    pluginDir,
+    port,
+    env: cfg.serverEnv as Record<string, string | undefined>,
+    log,
+  });
 
   proc.on("error", (err: Error) => {
     log?.error?.(`Server process error: ${err.message}`);
@@ -451,17 +456,23 @@ export default function register(api: PluginApi) {
         ref: { type: "string", description: "Element ref from snapshot (e.g., e2)" },
         selector: { type: "string", description: "CSS selector (alternative to ref)" },
         text: { type: "string", description: "Text to type" },
-        pressEnter: { type: "boolean", description: "Press Enter after typing" },
+        pressEnter: { type: "boolean", description: "Press Enter after typing (submit)" },
       },
       required: ["tabId", "text"],
     },
     async execute(_id, params) {
-      const { tabId, ...rest } = params as { tabId: string } & Record<string, unknown>;
+      const { tabId, pressEnter, ...rest } = params as { tabId: string; pressEnter?: boolean } & Record<string, unknown>;
       const userId = ctx.agentId || fallbackUserId;
       const result = await fetchApi(baseUrl, `/tabs/${tabId}/type`, {
         method: "POST",
         body: JSON.stringify({ ...rest, userId }),
       });
+      if (pressEnter) {
+        await fetchApi(baseUrl, `/tabs/${tabId}/press`, {
+          method: "POST",
+          body: JSON.stringify({ userId, key: "Enter" }),
+        });
+      }
       return toToolResult(result);
     },
   }));
@@ -483,6 +494,7 @@ export default function register(api: PluginApi) {
             "@youtube_search",
             "@amazon_search",
             "@reddit_search",
+            "@reddit_subreddit",
             "@wikipedia_search",
             "@twitter_search",
             "@yelp_search",
@@ -659,32 +671,6 @@ export default function register(api: PluginApi) {
     async execute(_id, _params) {
       const userId = ctx.agentId || fallbackUserId;
       const result = await fetchApi(baseUrl, `/tabs?userId=${userId}`);
-      return toToolResult(result);
-    },
-  }));
-
-  api.registerTool((_ctx: ToolContext) => ({
-    name: "camofox_youtube_transcript",
-    description: "Extract transcript from a YouTube video. Returns timestamped text.",
-    parameters: {
-      type: "object",
-      properties: {
-        url: { type: "string", description: "YouTube video URL" },
-        languages: {
-          type: "array",
-          items: { type: "string" },
-          description: "Preferred languages (default: [\"en\"])",
-          default: ["en"],
-        },
-      },
-      required: ["url"],
-    },
-    async execute(_id, params) {
-      const { url, languages } = params as { url: string; languages?: string[] };
-      const result = await fetchApi(baseUrl, "/youtube/transcript", {
-        method: "POST",
-        body: JSON.stringify({ url, languages }),
-      });
       return toToolResult(result);
     },
   }));

@@ -228,6 +228,41 @@ function createTestApp() {
       </body></html>
     `);
   });
+
+  // Page with horizontally scrollable content
+  app.get('/scroll-horizontal', (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html><head><title>Horizontal Scroll Test</title></head>
+      <body>
+        <div id="container" style="width: 300px; height: 300px; overflow: auto;">
+          <div id="wide-content" style="width: 5000px; height: 5000px;">
+            <span id="origin">Origin</span>
+            <span id="far-right" style="position: absolute; left: 4500px; top: 10px;">Far Right</span>
+          </div>
+        </div>
+        <div id="scroll-info"></div>
+        <script>
+          const c = document.getElementById('container');
+          document.getElementById('scroll-info').textContent = 'scrollLeft:' + c.scrollLeft + ' scrollTop:' + c.scrollTop;
+          c.addEventListener('scroll', () => {
+            document.getElementById('scroll-info').textContent = 'scrollLeft:' + c.scrollLeft + ' scrollTop:' + c.scrollTop;
+          });
+        </script>
+      </body></html>
+    `);
+  });
+
+  // Native download fixture for download-listener tests
+  app.get('/download-file', (req, res) => {
+    const content = Buffer.from('camofox-test-download-content');
+    res.set({
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': 'attachment; filename="test-download.bin"',
+      'Content-Length': String(content.length),
+    });
+    res.send(content);
+  });
   
   return app;
 }
