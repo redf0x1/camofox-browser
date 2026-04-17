@@ -16,6 +16,16 @@ export interface ProxyConfig {
   password: string;
 }
 
+export interface FingerprintConfig {
+  os?: 'windows' | 'macos' | 'linux' | Array<'windows' | 'macos' | 'linux'>;
+  allowWebgl: boolean;
+  humanize: boolean;
+  screen?: {
+    width: number;
+    height: number;
+  };
+}
+
 export interface ServerEnv {
   PATH?: string;
   HOME?: string;
@@ -57,6 +67,11 @@ export interface ServerEnv {
   CAMOFOX_HEADLESS?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS?: string;
+  CAMOFOX_OS?: string;
+  CAMOFOX_ALLOW_WEBGL?: string;
+  CAMOFOX_SCREEN_WIDTH?: string;
+  CAMOFOX_SCREEN_HEIGHT?: string;
+  CAMOFOX_HUMANIZE?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -102,6 +117,7 @@ export interface AppConfig {
   headless: boolean | 'virtual';
   evalExtendedRateLimitMax: number;
   evalExtendedRateLimitWindowMs: number;
+  fingerprint: FingerprintConfig;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
 }
@@ -146,6 +162,11 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_HEADLESS?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS?: string;
+  CAMOFOX_OS?: string;
+  CAMOFOX_ALLOW_WEBGL?: string;
+  CAMOFOX_SCREEN_WIDTH?: string;
+  CAMOFOX_SCREEN_HEIGHT?: string;
+  CAMOFOX_HUMANIZE?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -170,6 +191,45 @@ function parsePort(raw: string, source: string): number {
     throw new Error(`${source} must be between 1 and 65535 (got: ${parsed})`);
   }
   return parsed;
+}
+
+function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  return fallback;
+}
+
+function parseCamoufoxOs(raw: string | undefined): FingerprintConfig['os'] {
+  if (!raw) return undefined;
+  const allowed = new Set(['windows', 'macos', 'linux']);
+  const values = raw
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (values.length === 0) return undefined;
+  if (values.some((value) => !allowed.has(value))) {
+    throw new Error('CAMOFOX_OS must contain only windows, macos, linux, or a comma-separated combination of them');
+  }
+
+  return values.length === 1
+    ? (values[0] as 'windows' | 'macos' | 'linux')
+    : (values as Array<'windows' | 'macos' | 'linux'>);
+}
+
+function parseScreen(widthRaw: string | undefined, heightRaw: string | undefined): FingerprintConfig['screen'] {
+  if (!widthRaw && !heightRaw) return undefined;
+  if (!widthRaw || !heightRaw) {
+    throw new Error('CAMOFOX_SCREEN_WIDTH and CAMOFOX_SCREEN_HEIGHT must be provided together');
+  }
+  const width = parsePositiveIntOrDefault(widthRaw, -1);
+  const height = parsePositiveIntOrDefault(heightRaw, -1);
+  if (width <= 0 || height <= 0) {
+    throw new Error('CAMOFOX_SCREEN_WIDTH and CAMOFOX_SCREEN_HEIGHT must be positive integers');
+  }
+  return { width, height };
 }
 
 export function loadConfig(env: ConfigEnv = process.env): AppConfig {
@@ -232,6 +292,12 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const vncHost = env.CAMOFOX_VNC_HOST || 'localhost';
   const presetsFile = env.CAMOFOX_PRESETS_FILE || undefined;
   const idleTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_IDLE_TIMEOUT_MS, 1800000);
+  const fingerprint: FingerprintConfig = {
+    os: parseCamoufoxOs(env.CAMOFOX_OS),
+    allowWebgl: parseBoolean(env.CAMOFOX_ALLOW_WEBGL, false),
+    humanize: parseBoolean(env.CAMOFOX_HUMANIZE, true),
+    screen: parseScreen(env.CAMOFOX_SCREEN_WIDTH, env.CAMOFOX_SCREEN_HEIGHT),
+  };
 
   return {
     port,
@@ -272,6 +338,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     headless,
     evalExtendedRateLimitMax,
     evalExtendedRateLimitWindowMs,
+    fingerprint,
     proxy: {
       host: env.PROXY_HOST || '',
       port: env.PROXY_PORT || '',
@@ -320,6 +387,11 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_HEADLESS: env.CAMOFOX_HEADLESS,
       CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX,
       CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS,
+      CAMOFOX_OS: env.CAMOFOX_OS,
+      CAMOFOX_ALLOW_WEBGL: env.CAMOFOX_ALLOW_WEBGL,
+      CAMOFOX_SCREEN_WIDTH: env.CAMOFOX_SCREEN_WIDTH,
+      CAMOFOX_SCREEN_HEIGHT: env.CAMOFOX_SCREEN_HEIGHT,
+      CAMOFOX_HUMANIZE: env.CAMOFOX_HUMANIZE,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,
