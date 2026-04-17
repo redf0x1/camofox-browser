@@ -152,6 +152,12 @@ services:
       # Optional auth gates
       # CAMOFOX_API_KEY: "change-me"
       # CAMOFOX_ADMIN_KEY: "change-me"
+      # Optional fingerprint tuning
+      # CAMOFOX_OS: "windows,macos"
+      # CAMOFOX_ALLOW_WEBGL: "true"
+      # CAMOFOX_HUMANIZE: "true"
+      # CAMOFOX_SCREEN_WIDTH: "1920"
+      # CAMOFOX_SCREEN_HEIGHT: "1080"
       # Optional: proxy routing (also enables Camoufox geoip mode)
       # PROXY_HOST: ""
       # PROXY_PORT: ""
@@ -634,6 +640,11 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
 | `CAMOFOX_API_KEY` | (empty) | When set, conditionally guards protected endpoints (tab creation, navigation, interaction, session management, downloads, tracing, console) via `Authorization: Bearer` header. Unset = no auth enforced. |
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
+| `CAMOFOX_OS` | host OS | Camoufox OS fingerprint target. Accepts `windows`, `macos`, `linux`, or a comma-separated list such as `windows,macos` for randomized selection. |
+| `CAMOFOX_ALLOW_WEBGL` | `false` | Whether to expose and spoof WebGL instead of blocking it. Accepts `true`/`false` or `1`/`0`. |
+| `CAMOFOX_HUMANIZE` | `true` | Whether Camoufox should humanize interactions. Accepts `true`/`false` or `1`/`0`. |
+| `CAMOFOX_SCREEN_WIDTH` | (unset) | Screen width to pass to Camoufox fingerprint configuration. Must be set together with `CAMOFOX_SCREEN_HEIGHT`. |
+| `CAMOFOX_SCREEN_HEIGHT` | (unset) | Screen height to pass to Camoufox fingerprint configuration. Must be set together with `CAMOFOX_SCREEN_WIDTH`. |
 | `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
 | `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
 | `CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX` | `20` | Max evaluate-extended requests per user per window |
@@ -678,6 +689,11 @@ docker build -t camofox-browser .
 docker run -p 9377:9377 -p 6080:6080 \
   -v ~/.camofox:/home/node/.camofox \
   -e CAMOFOX_PORT=9377 \
+  -e CAMOFOX_OS=windows \
+  -e CAMOFOX_ALLOW_WEBGL=true \
+  -e CAMOFOX_HUMANIZE=true \
+  -e CAMOFOX_SCREEN_WIDTH=1920 \
+  -e CAMOFOX_SCREEN_HEIGHT=1080 \
   camofox-browser
 ```
 
@@ -780,4 +796,3 @@ This project is based on [camofox-browser](https://github.com/jo-inc/camofox-bro
 ## Crypto Scam Warning
 
 Sketchy people are doing sketchy things with crypto tokens named "Camofox" now that this project is getting attention. **Camofox is not a crypto project and will never be one.** Any token, coin, or NFT using the Camofox name has nothing to do with us.
-
