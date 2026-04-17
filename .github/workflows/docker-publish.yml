@@ -4,8 +4,14 @@ on:
   push:
     branches:
       - main
+      - feat/**
+      - fix/**
+      - chore/**
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -16,12 +22,15 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
+      pull-requests: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -36,6 +45,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Bump semantic version tag on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: semver
+        shell: bash
+        run: |
+          git fetch --tags --force
+          latest_tag=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
+          if [ -z "$latest_tag" ]; then
+            latest_tag="v0.0.0"
+          fi
+          version="${latest_tag#v}"
+          IFS='.' read -r major minor patch <<< "$version"
+          next_tag="v${major}.${minor}.$((patch + 1))"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$next_tag"
+          git push origin "$next_tag"
+          echo "next_tag=$next_tag" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -46,6 +74,8 @@ jobs:
             type=ref,event=tag
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=${{ steps.semver.outputs.next_tag }},enable=${{ steps.semver.outputs.next_tag != '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -56,5 +86,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CAMOFOX_OS=windows
+            CAMOFOX_ALLOW_WEBGL=true
+            CAMOFOX_HUMANIZE=true
+            CAMOFOX_SCREEN_WIDTH=1920
+            CAMOFOX_SCREEN_HEIGHT=1080
           cache-from: type=gha
           cache-to: type=gha,mode=max
