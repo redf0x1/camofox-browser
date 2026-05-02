@@ -201,4 +201,54 @@ describe('tracing.ts config safety', () => {
       startedAt: null,
     });
   });
+
+  test('stopTracingChunk() blocks timeout auto-stop until the chunk stop finishes', async () => {
+    jest.useFakeTimers();
+    fakeTimersEnabled = true;
+
+    const { startTracing, startTracingChunk, stopTracingChunk, getTracingState } = require('../../dist/src/services/tracing');
+    let resolveStopChunk;
+    const stopChunkGate = new Promise((resolve) => {
+      resolveStopChunk = resolve;
+    });
+    const context = {
+      tracing: {
+        start: jest.fn().mockResolvedValue(undefined),
+        startChunk: jest.fn().mockResolvedValue(undefined),
+        stopChunk: jest.fn().mockImplementation(() => stopChunkGate),
+        stop: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await startTracing('user-a', context);
+    await startTracingChunk('user-a', context);
+
+    const stopChunkPromise = stopTracingChunk('user-a', context);
+    await Promise.resolve();
+
+    expect(context.tracing.stopChunk).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(30_000);
+
+    expect(context.tracing.stop).not.toHaveBeenCalled();
+    expect(getTracingState('user-a')).toEqual({
+      active: true,
+      chunkActive: true,
+      startedAt: expect.any(Number),
+    });
+
+    resolveStopChunk(undefined);
+    await expect(stopChunkPromise).resolves.toEqual({
+      path: expect.stringMatching(new RegExp(`^${fallbackTracesDir}/.+-\\d+\\.zip$`)),
+      size: 123,
+    });
+    await Promise.resolve();
+
+    expect(context.tracing.stop).toHaveBeenCalledTimes(1);
+    expect(getTracingState('user-a')).toEqual({
+      active: false,
+      chunkActive: false,
+      startedAt: null,
+    });
+  });
 });

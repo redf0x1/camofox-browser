@@ -15,6 +15,7 @@ interface TracingState {
 	startedAt: number;
 	timer?: ReturnType<typeof setTimeout>;
 	stopPromise?: Promise<void>;
+	chunkStopPromise?: Promise<void>;
 }
 
 const states = new Map<string, TracingState>();
@@ -139,6 +140,13 @@ export async function startTracing(
 						// Manual stop failed; fall through to auto-stop if still active.
 					}
 				}
+				if (activeState?.chunkStopPromise) {
+					try {
+						await activeState.chunkStopPromise;
+					} catch {
+						// Chunk stop failed; fall through to auto-stop if tracing is still active.
+					}
+				}
 				if (states.get(userId)?.active) {
 					const path = defaultPath(userId);
 					const currentState = states.get(userId);
@@ -180,6 +188,17 @@ export async function stopTracing(
 			await state.stopPromise;
 		} catch {
 			// The in-flight stop failed; continue below if tracing is still active.
+		}
+		state = states.get(userId);
+		if (!state?.active) {
+			return { path: '', size: 0, alreadyStopped: true };
+		}
+	}
+	if (state.chunkStopPromise) {
+		try {
+			await state.chunkStopPromise;
+		} catch {
+			// The in-flight chunk stop failed; continue below if tracing is still active.
 		}
 		state = states.get(userId);
 		if (!state?.active) {
@@ -241,8 +260,16 @@ export async function stopTracingChunk(
 
 	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
-	await context.tracing.stopChunk({ path });
-	state.chunkActive = false;
+	const chunkStopPromise = context.tracing.stopChunk({ path });
+	state.chunkStopPromise = chunkStopPromise;
+	try {
+		await chunkStopPromise;
+		state.chunkActive = false;
+	} finally {
+		if (state.chunkStopPromise === chunkStopPromise) {
+			delete state.chunkStopPromise;
+		}
+	}
 	const size = statSync(path).size;
 	return { path, size };
 }
