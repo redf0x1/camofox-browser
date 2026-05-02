@@ -20,10 +20,12 @@ jest.mock('node:fs', () => ({
 let fs;
 
 describe('tracing artifact helpers', () => {
-  /** @type {(userId: string) => Array<{filename: string, path: string, size: number, createdAt: number}>} */
+  /** @type {(userId: string) => Array<{filename: string, size: number, createdAt: number}>} */
   let listTraceArtifacts;
   /** @type {(userId: string, filename: string) => boolean} */
   let deleteTraceArtifact;
+  /** @type {(userId: string, filename: string) => string} */
+  let resolveTraceArtifactPath;
 
   const TRACES_DIR = mockTracesDir;
   const userOneToken = Buffer.from('user/one').toString('base64url');
@@ -35,7 +37,7 @@ describe('tracing artifact helpers', () => {
     jest.resetModules();
     jest.clearAllMocks();
     fs = require('node:fs');
-    ({ listTraceArtifacts, deleteTraceArtifact } = require('../../dist/src/services/tracing'));
+    ({ listTraceArtifacts, deleteTraceArtifact, resolveTraceArtifactPath } = require('../../dist/src/services/tracing'));
   });
 
   test('listTraceArtifacts() returns only zip files belonging to the exact user ownership token', () => {
@@ -101,5 +103,12 @@ describe('tracing artifact helpers', () => {
         createdAt: 1000,
       },
     ]);
+  });
+
+  test('resolveTraceArtifactPath() rejects filenames outside the generated contract', () => {
+    expect(() => resolveTraceArtifactPath('user/one', `${userOneToken}.zip`)).toThrow('Invalid trace filename');
+    expect(() => resolveTraceArtifactPath('user/one', `${userOneToken}-not-a-timestamp.zip`)).toThrow(
+      'Invalid trace filename',
+    );
   });
 });

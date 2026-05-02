@@ -7,6 +7,7 @@ import { loadConfig } from '../utils/config';
 const CONFIG = loadConfig();
 const TRACES_DIR = CONFIG.tracesDir;
 const MAX_TRACE_DURATION = CONFIG.traceMaxDurationMs;
+const TRACE_ARTIFACT_FILENAME_PATTERN = /^([A-Za-z0-9_-]+)-\d+\.zip$/;
 
 interface TracingState {
 	active: boolean;
@@ -26,7 +27,7 @@ function buildTraceArtifactFilename(userId: string): string {
 }
 
 function getTraceArtifactFilenameOwnerToken(filename: string): string | null {
-	const match = /^([A-Za-z0-9_-]+)-\d+\.zip$/.exec(filename);
+	const match = TRACE_ARTIFACT_FILENAME_PATTERN.exec(filename);
 	return match ? match[1] : null;
 }
 
@@ -62,7 +63,7 @@ export function listTraceArtifacts(userId: string): Array<{ filename: string; si
 }
 
 export function resolveTraceArtifactPath(userId: string, filename: string): string {
-	if (!/^[a-zA-Z0-9_.-]+\.zip$/.test(filename) || filename.includes('..') || filename.includes('/')) {
+	if (!TRACE_ARTIFACT_FILENAME_PATTERN.test(filename)) {
 		throw new Error('Invalid trace filename');
 	}
 	const ownerToken = getTraceArtifactOwnerToken(userId);

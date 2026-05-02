@@ -1534,9 +1534,6 @@ router.get('/sessions/:userId/traces/:filename', async (req, res) => {
 		const userId = normalizeUserId(req.params.userId);
 		const filename = req.params.filename;
 		const filePath = resolveTraceArtifactPath(userId, filename);
-		if (!fs.existsSync(filePath)) {
-			return res.status(404).json({ ok: false, error: 'Trace artifact not found' });
-		}
 
 		const safeName = filename.replace(/[\r\n\0"]/g, '');
 		res.setHeader('Content-Type', 'application/zip');
@@ -1565,11 +1562,6 @@ router.delete('/sessions/:userId/traces/:filename', async (req, res) => {
 
 		const userId = normalizeUserId(req.params.userId);
 		const filename = req.params.filename;
-		const filePath = resolveTraceArtifactPath(userId, filename);
-		if (!fs.existsSync(filePath)) {
-			return res.status(404).json({ ok: false, error: 'Trace artifact not found' });
-		}
-
 		deleteTraceArtifact(userId, filename);
 		return res.json({ ok: true });
 	} catch (err) {
