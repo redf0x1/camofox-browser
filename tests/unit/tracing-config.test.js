@@ -251,4 +251,45 @@ describe('tracing.ts config safety', () => {
       startedAt: null,
     });
   });
+
+  test('stopTracingChunk() coalesces concurrent stop requests onto one chunk stop operation', async () => {
+    const { startTracing, startTracingChunk, stopTracingChunk, getTracingState } = require('../../dist/src/services/tracing');
+    let resolveStopChunk;
+    const stopChunkGate = new Promise((resolve) => {
+      resolveStopChunk = resolve;
+    });
+    const context = {
+      tracing: {
+        start: jest.fn().mockResolvedValue(undefined),
+        startChunk: jest.fn().mockResolvedValue(undefined),
+        stopChunk: jest.fn().mockImplementation(() => stopChunkGate),
+      },
+    };
+
+    await startTracing('user-a', context);
+    await startTracingChunk('user-a', context);
+
+    const firstStopPromise = stopTracingChunk('user-a', context);
+    await Promise.resolve();
+    const secondStopPromise = stopTracingChunk('user-a', context);
+
+    expect(context.tracing.stopChunk).toHaveBeenCalledTimes(1);
+
+    resolveStopChunk(undefined);
+    await expect(Promise.all([firstStopPromise, secondStopPromise])).resolves.toEqual([
+      {
+        path: expect.stringMatching(new RegExp(`^${fallbackTracesDir}/.+-\\d+\\.zip$`)),
+        size: 123,
+      },
+      {
+        path: expect.stringMatching(new RegExp(`^${fallbackTracesDir}/.+-\\d+\\.zip$`)),
+        size: 123,
+      },
+    ]);
+    expect(getTracingState('user-a')).toEqual({
+      active: true,
+      chunkActive: false,
+      startedAt: expect.any(Number),
+    });
+  });
 });

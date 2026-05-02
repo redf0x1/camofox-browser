@@ -996,6 +996,10 @@ router.get(
 		res: Response,
 	) => {
 		try {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+				return res.status(403).json({ ok: false, error: 'Forbidden' });
+			}
+
 			const userId = req.query.userId;
 			const found = findTabById(req.params.tabId, userId);
 			if (!found) {

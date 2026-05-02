@@ -15,7 +15,7 @@ interface TracingState {
 	startedAt: number;
 	timer?: ReturnType<typeof setTimeout>;
 	stopPromise?: Promise<void>;
-	chunkStopPromise?: Promise<void>;
+	chunkStopPromise?: Promise<{ path: string; size: number }>;
 }
 
 const states = new Map<string, TracingState>();
@@ -257,21 +257,26 @@ export async function stopTracingChunk(
 	if (!state?.chunkActive) {
 		throw new Error('No active chunk');
 	}
+	if (state.chunkStopPromise) {
+		return state.chunkStopPromise;
+	}
 
 	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
-	const chunkStopPromise = context.tracing.stopChunk({ path });
+	const chunkStopPromise = (async () => {
+		await context.tracing.stopChunk({ path });
+		state.chunkActive = false;
+		const size = statSync(path).size;
+		return { path, size };
+	})();
 	state.chunkStopPromise = chunkStopPromise;
 	try {
-		await chunkStopPromise;
-		state.chunkActive = false;
+		return await chunkStopPromise;
 	} finally {
 		if (state.chunkStopPromise === chunkStopPromise) {
 			delete state.chunkStopPromise;
 		}
 	}
-	const size = statSync(path).size;
-	return { path, size };
 }
 
 export function getTracingState(userId: string): { active: boolean; chunkActive: boolean; startedAt: number | null } {

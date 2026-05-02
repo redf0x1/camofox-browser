@@ -1,6 +1,7 @@
 const { startServer, stopServer, getServerUrl } = require('../helpers/startServer');
 const { startTestSite, stopTestSite, getTestSiteUrl } = require('../helpers/testSite');
 const { createClient } = require('../helpers/client');
+const crypto = require('crypto');
 
 describe('Images route', () => {
   let serverUrl;
@@ -80,5 +81,30 @@ describe('Images route', () => {
     } finally {
       await client.cleanup();
     }
+  });
+});
+
+describe('Images route auth', () => {
+  let serverUrl;
+
+  beforeAll(async () => {
+    await startServer(0, {
+      CAMOFOX_API_KEY: `test-images-key-${crypto.randomUUID()}`,
+    });
+    serverUrl = getServerUrl();
+  }, 120000);
+
+  afterAll(async () => {
+    await stopServer();
+  }, 30000);
+
+  test('get images returns 403 without API key when server auth is enabled', async () => {
+    const userId = `images-auth-${crypto.randomUUID()}`;
+    const res = await fetch(`${serverUrl}/tabs/missing/images?userId=${encodeURIComponent(userId)}`);
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('Forbidden');
   });
 });
