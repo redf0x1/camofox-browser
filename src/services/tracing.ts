@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import type { BrowserContext } from 'playwright-core';
 import { loadConfig } from '../utils/config';
@@ -54,9 +54,8 @@ function resolveManagedTraceOutputPath(userId: string, outputPath?: string): str
 		return defaultPath(userId);
 	}
 
-	const resolvedPath = resolveAndValidateOutputPath(outputPath);
-	const targetDir = resolvedPath === TRACES_DIR ? TRACES_DIR : dirname(resolvedPath);
-	return join(targetDir, buildTraceArtifactFilename(userId));
+	resolveAndValidateOutputPath(outputPath);
+	return join(TRACES_DIR, buildTraceArtifactFilename(userId));
 }
 
 export function listTraceArtifacts(userId: string): Array<{ filename: string; size: number; createdAt: number }> {

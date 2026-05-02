@@ -1544,7 +1544,10 @@ router.get('/sessions/:userId/traces/:filename', async (req, res) => {
 		stream.on('error', (streamErr) => {
 			if (!res.headersSent) {
 				const status = getTraceArtifactErrorStatus(streamErr);
+				res.removeHeader('Content-Disposition');
+				res.removeHeader('Content-Type');
 				res.status(status).json({ ok: false, error: safeError(streamErr) });
+				return;
 			}
 			res.destroy();
 		});

@@ -123,4 +123,25 @@ describe('Tracing artifacts', () => {
       await client.cleanup();
     }
   }, 120000);
+
+  test('trace stop writes managed artifacts to the traces root even when caller passes a nested path', async () => {
+    const client = createClient(serverUrl);
+
+    try {
+      const { tabId } = await client.createTab(`${testSiteUrl}/pageA`);
+      const nestedPath = path.join(loadConfig().tracesDir, 'nested', 'caller-name.zip');
+
+      await client.request('POST', `/tabs/${tabId}/trace/start`, { userId: client.userId });
+
+      const stopped = await client.request('POST', `/tabs/${tabId}/trace/stop`, {
+        userId: client.userId,
+        path: nestedPath,
+      });
+
+      expect(stopped.ok).toBe(true);
+      expect(path.dirname(stopped.path)).toBe(path.resolve(loadConfig().tracesDir));
+    } finally {
+      await client.cleanup();
+    }
+  }, 120000);
 });

@@ -14,9 +14,11 @@ jest.mock('node:fs', () => ({
   readdirSync: jest.fn(),
   statSync: jest.fn(),
   unlinkSync: jest.fn(),
+  readFileSync: jest.fn().mockReturnValue(JSON.stringify({ version: 'test' })),
+  createReadStream: jest.fn(),
 }));
 
-/** @type {{mkdirSync: jest.Mock, readdirSync: jest.Mock, statSync: jest.Mock, unlinkSync: jest.Mock}} */
+/** @type {{mkdirSync: jest.Mock, readdirSync: jest.Mock, statSync: jest.Mock, unlinkSync: jest.Mock, readFileSync: jest.Mock, createReadStream: jest.Mock}} */
 let fs;
 
 describe('tracing artifact helpers', () => {
@@ -139,5 +141,126 @@ describe('tracing artifact helpers', () => {
     expect(context.tracing.stop).toHaveBeenCalledWith({
       path: expect.stringMatching(new RegExp(`^${mockTracesDir}/${userOneToken}-\\d+\\.zip$`)),
     });
+  });
+
+  test('trace download returns JSON when the file stream errors before sending bytes', async () => {
+    jest.resetModules();
+
+    jest.doMock('../../dist/src/middleware/errors', () => ({
+      safeError: (err) => (err instanceof Error ? err.message : String(err)),
+    }));
+    jest.doMock('../../dist/src/middleware/logging', () => ({ log: jest.fn() }));
+    jest.doMock('../../dist/src/middleware/auth', () => ({ isAuthorizedWithApiKey: jest.fn().mockReturnValue(true) }));
+    jest.doMock('../../dist/src/middleware/rate-limit', () => ({ checkRateLimit: jest.fn() }));
+    jest.doMock('../../dist/src/utils/presets', () => ({
+      getAllPresets: jest.fn().mockReturnValue({}),
+      resolveContextOptions: jest.fn().mockReturnValue(null),
+      validateContextOptions: jest.fn().mockReturnValue(null),
+    }));
+    jest.doMock('../../dist/src/services/context-pool', () => ({
+      contextPool: { listActiveUserIds: jest.fn().mockReturnValue([]), size: jest.fn().mockReturnValue(0) },
+      getDisplayForUser: jest.fn(),
+    }));
+    jest.doMock('../../dist/src/services/vnc', () => ({ startVnc: jest.fn(), stopVnc: jest.fn() }));
+    jest.doMock('../../dist/src/services/session', () => ({
+      MAX_TABS_PER_SESSION: 10,
+      acquireFirstCreateMutex: jest.fn(),
+      commitStagedFirstUse: jest.fn(),
+      createCanonicalProfile: jest.fn(),
+      createStagedSession: jest.fn(),
+      findTabById: jest.fn(),
+      getCanonicalProfile: jest.fn(),
+      getSession: jest.fn(),
+      getSessionMapKey: jest.fn(),
+      getSessionsForUser: jest.fn().mockReturnValue([]),
+      getTabGroup: jest.fn(),
+      indexTab: jest.fn(),
+      normalizeUserId: (value) => String(value),
+      rollbackCanonicalMutex: jest.fn(),
+      rollbackStagedFirstUse: jest.fn(),
+      unindexTab: jest.fn(),
+      closeSessionsForUser: jest.fn(),
+      countTotalTabsForSessions: jest.fn().mockReturnValue(0),
+      withUserLimit: jest.fn((_userId, _limit, operation) => operation()),
+    }));
+    jest.doMock('../../dist/src/services/tab', () => ({
+      backTab: jest.fn(),
+      buildSnapshotPayload: jest.fn(),
+      buildRefs: jest.fn(),
+      clickTab: jest.fn(),
+      createTabState: jest.fn(),
+      evaluateTab: jest.fn(),
+      evaluateTabExtended: jest.fn(),
+      forwardTab: jest.fn(),
+      getLinks: jest.fn(),
+      pressTab: jest.fn(),
+      refreshTab: jest.fn(),
+      screenshotTab: jest.fn(),
+      scrollElementTab: jest.fn(),
+      snapshotTab: jest.fn(),
+      calculateTypeTimeoutMs: jest.fn(),
+      typeTab: jest.fn(),
+      safePageClose: jest.fn(),
+      validateUrl: jest.fn(),
+      waitForPageReady: jest.fn(),
+      withTimeout: jest.fn(),
+      withTabLock: jest.fn(),
+    }));
+    jest.doMock('../../dist/src/services/download', () => ({
+      commitStagedDownloads: jest.fn(),
+      registerDownloadListener: jest.fn(),
+      listDownloads: jest.fn(),
+      getDownload: jest.fn(),
+      getDownloadPath: jest.fn(),
+      deleteDownload: jest.fn(),
+      getRecentDownloads: jest.fn(),
+      cleanupUserDownloads: jest.fn(),
+      markDownloadsStaged: jest.fn(),
+    }));
+    jest.doMock('../../dist/src/services/resource-extractor', () => ({
+      extractResources: jest.fn(),
+      resolveBlob: jest.fn(),
+    }));
+    jest.doMock('../../dist/src/services/batch-downloader', () => ({ batchDownload: jest.fn() }));
+    jest.doMock('../../dist/src/services/tracing', () => ({
+      startTracing: jest.fn(),
+      stopTracing: jest.fn(),
+      startTracingChunk: jest.fn(),
+      stopTracingChunk: jest.fn(),
+      getTracingState: jest.fn(),
+      listTraceArtifacts: jest.fn().mockReturnValue([]),
+      resolveTraceArtifactPath: jest.fn().mockReturnValue('/fake/trace.zip'),
+      deleteTraceArtifact: jest.fn(),
+    }));
+
+    fs = require('node:fs');
+    const { EventEmitter } = require('node:events');
+    fs.createReadStream.mockImplementation(() => {
+      const stream = new EventEmitter();
+      stream.pipe = jest.fn(() => {
+        process.nextTick(() => stream.emit('error', new Error('stream boom')));
+      });
+      return stream;
+    });
+
+    const express = require('express');
+    const router = require('../../dist/src/routes/core').default;
+    const app = express();
+    app.use(router);
+
+    const server = await new Promise((resolve) => {
+      const instance = app.listen(0, () => resolve(instance));
+    });
+
+    try {
+      const { port } = server.address();
+      const response = await fetch(`http://127.0.0.1:${port}/sessions/user-a/traces/${userOneToken}-1.zip`);
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get('content-type')).toContain('application/json');
+      await expect(response.json()).resolves.toEqual({ ok: false, error: 'stream boom' });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
