@@ -1,11 +1,11 @@
 import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import os from 'node:os';
 import { join, resolve } from 'node:path';
 
 import type { BrowserContext } from 'playwright-core';
 import { loadConfig } from '../utils/config';
 
 const CONFIG = loadConfig();
-const TRACES_DIR = resolve(CONFIG.tracesDir);
 const MAX_TRACE_DURATION = CONFIG.traceMaxDurationMs;
 const TRACE_ARTIFACT_FILENAME_PATTERN = /^([A-Za-z0-9_-]+)-\d+\.zip$/;
 
@@ -17,6 +17,14 @@ interface TracingState {
 }
 
 const states = new Map<string, TracingState>();
+
+function getTracesDir(): string {
+	const configuredTracesDir =
+		typeof CONFIG.tracesDir === 'string' && CONFIG.tracesDir.length > 0
+			? CONFIG.tracesDir
+			: join(os.homedir(), '.camofox', 'traces');
+	return resolve(configuredTracesDir);
+}
 
 function getTraceArtifactOwnerToken(userId: string): string {
 	return Buffer.from(userId, 'utf8').toString('base64url');
@@ -32,8 +40,9 @@ function getTraceArtifactFilenameOwnerToken(filename: string): string | null {
 }
 
 function defaultPath(userId: string): string {
-	mkdirSync(TRACES_DIR, { recursive: true });
-	return join(TRACES_DIR, buildTraceArtifactFilename(userId));
+	const tracesDir = getTracesDir();
+	mkdirSync(tracesDir, { recursive: true });
+	return join(tracesDir, buildTraceArtifactFilename(userId));
 }
 
 function ensureOutputDir(path: string): void {
@@ -41,9 +50,10 @@ function ensureOutputDir(path: string): void {
 }
 
 function resolveAndValidateOutputPath(outputPath: string): string {
+	const tracesDir = getTracesDir();
 	const resolvedPath = resolve(outputPath);
-	const normalizedTracesDir = TRACES_DIR.endsWith('/') ? TRACES_DIR : `${TRACES_DIR}/`;
-	if (!resolvedPath.startsWith(normalizedTracesDir) && resolvedPath !== TRACES_DIR) {
+	const normalizedTracesDir = tracesDir.endsWith('/') ? tracesDir : `${tracesDir}/`;
+	if (!resolvedPath.startsWith(normalizedTracesDir) && resolvedPath !== tracesDir) {
 		throw new Error('Invalid trace output path: must be within traces directory');
 	}
 	return resolvedPath;
@@ -55,16 +65,17 @@ function resolveManagedTraceOutputPath(userId: string, outputPath?: string): str
 	}
 
 	resolveAndValidateOutputPath(outputPath);
-	return join(TRACES_DIR, buildTraceArtifactFilename(userId));
+	return join(getTracesDir(), buildTraceArtifactFilename(userId));
 }
 
 export function listTraceArtifacts(userId: string): Array<{ filename: string; size: number; createdAt: number }> {
+	const tracesDir = getTracesDir();
 	const ownerToken = getTraceArtifactOwnerToken(userId);
-	mkdirSync(TRACES_DIR, { recursive: true });
-	return readdirSync(TRACES_DIR, { withFileTypes: true })
+	mkdirSync(tracesDir, { recursive: true });
+	return readdirSync(tracesDir, { withFileTypes: true })
 		.filter((entry) => entry.isFile() && getTraceArtifactFilenameOwnerToken(entry.name) === ownerToken)
 		.flatMap((entry) => {
-			const path = join(TRACES_DIR, entry.name);
+			const path = join(tracesDir, entry.name);
 			let stat;
 			try {
 				stat = statSync(path);
@@ -87,7 +98,7 @@ export function resolveTraceArtifactPath(userId: string, filename: string): stri
 	if (getTraceArtifactFilenameOwnerToken(filename) !== ownerToken) {
 		throw new Error('Trace artifact does not belong to this user');
 	}
-	return resolveAndValidateOutputPath(join(TRACES_DIR, filename));
+	return resolveAndValidateOutputPath(join(getTracesDir(), filename));
 }
 
 export function deleteTraceArtifact(userId: string, filename: string): boolean {
