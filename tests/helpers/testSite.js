@@ -253,6 +253,48 @@ function createTestApp() {
     `);
   });
 
+  const pngPixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0pQ4sAAAAASUVORK5CYII=',
+    'base64',
+  );
+
+  app.get('/assets/:filename', (req, res) => {
+    const name = String(req.params.filename || '');
+    if (name === 'hero.png' || name === 'lazy.png') {
+      res.set('Content-Type', 'image/png');
+      return res.send(pngPixel);
+    }
+    return res.status(404).send('Not found');
+  });
+
+  app.get('/images', (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Images Page</title></head>
+        <body>
+          <main id="gallery">
+            <img id="hero-image" src="/assets/hero.png" alt="Hero image" width="32" height="24" />
+            <img
+              id="inline-image"
+              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+              alt="Inline image"
+              width="1"
+              height="1"
+            />
+            <img id="blob-image" alt="Blob image" width="8" height="8" />
+            <img id="lazy-image" src="/assets/lazy.png" loading="lazy" alt="Lazy image" width="20" height="20" />
+          </main>
+          <script>
+            const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#ff3366"/></svg>';
+            const blob = new Blob([svg], { type: 'image/svg+xml' });
+            document.getElementById('blob-image').src = URL.createObjectURL(blob);
+          </script>
+        </body>
+      </html>
+    `);
+  });
+
   // Native download fixture for download-listener tests
   app.get('/download-file', (req, res) => {
     const content = Buffer.from('camofox-test-download-content');

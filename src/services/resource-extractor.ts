@@ -346,3 +346,13 @@ export async function extractResources(page: Page, params: ExtractResourcesParam
 		},
 	};
 }
+
+export async function extractImages(
+	page: Page,
+	params: Pick<ExtractResourcesParams, 'selector' | 'extensions' | 'resolveBlobs' | 'triggerLazyLoad'>,
+): Promise<ExtractResourcesResult> {
+	return extractResources(page, {
+		...params,
+		types: ['images'],
+	});
+}

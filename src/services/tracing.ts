@@ -1,26 +1,50 @@
-import { mkdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import os from 'node:os';
 import { join, resolve } from 'node:path';
 
 import type { BrowserContext } from 'playwright-core';
 import { loadConfig } from '../utils/config';
 
 const CONFIG = loadConfig();
-const TRACES_DIR = CONFIG.tracesDir;
 const MAX_TRACE_DURATION = CONFIG.traceMaxDurationMs;
+const TRACE_ARTIFACT_FILENAME_PATTERN = /^([A-Za-z0-9_-]+)-\d+\.zip$/;
 
 interface TracingState {
 	active: boolean;
 	chunkActive: boolean;
 	startedAt: number;
 	timer?: ReturnType<typeof setTimeout>;
+	stopPromise?: Promise<void>;
+	chunkStopPromise?: Promise<{ path: string; size: number }>;
 }
 
 const states = new Map<string, TracingState>();
 
+function getTracesDir(): string {
+	const configuredTracesDir =
+		typeof CONFIG.tracesDir === 'string' && CONFIG.tracesDir.length > 0
+			? CONFIG.tracesDir
+			: join(os.homedir(), '.camofox', 'traces');
+	return resolve(configuredTracesDir);
+}
+
+function getTraceArtifactOwnerToken(userId: string): string {
+	return Buffer.from(userId, 'utf8').toString('base64url');
+}
+
+function buildTraceArtifactFilename(userId: string): string {
+	return `${getTraceArtifactOwnerToken(userId)}-${Date.now()}.zip`;
+}
+
+function getTraceArtifactFilenameOwnerToken(filename: string): string | null {
+	const match = TRACE_ARTIFACT_FILENAME_PATTERN.exec(filename);
+	return match ? match[1] : null;
+}
+
 function defaultPath(userId: string): string {
-	mkdirSync(TRACES_DIR, { recursive: true });
-	const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
-	return join(TRACES_DIR, `${safeUserId}-${Date.now()}.zip`);
+	const tracesDir = getTracesDir();
+	mkdirSync(tracesDir, { recursive: true });
+	return join(tracesDir, buildTraceArtifactFilename(userId));
 }
 
 function ensureOutputDir(path: string): void {
@@ -28,12 +52,61 @@ function ensureOutputDir(path: string): void {
 }
 
 function resolveAndValidateOutputPath(outputPath: string): string {
+	const tracesDir = getTracesDir();
 	const resolvedPath = resolve(outputPath);
-	const normalizedTracesDir = TRACES_DIR.endsWith('/') ? TRACES_DIR : `${TRACES_DIR}/`;
-	if (!resolvedPath.startsWith(normalizedTracesDir) && resolvedPath !== TRACES_DIR) {
+	const normalizedTracesDir = tracesDir.endsWith('/') ? tracesDir : `${tracesDir}/`;
+	if (!resolvedPath.startsWith(normalizedTracesDir) && resolvedPath !== tracesDir) {
 		throw new Error('Invalid trace output path: must be within traces directory');
 	}
 	return resolvedPath;
+}
+
+function resolveManagedTraceOutputPath(userId: string, outputPath?: string): string {
+	if (!outputPath) {
+		return defaultPath(userId);
+	}
+
+	resolveAndValidateOutputPath(outputPath);
+	return join(getTracesDir(), buildTraceArtifactFilename(userId));
+}
+
+export function listTraceArtifacts(userId: string): Array<{ filename: string; size: number; createdAt: number }> {
+	const tracesDir = getTracesDir();
+	const ownerToken = getTraceArtifactOwnerToken(userId);
+	mkdirSync(tracesDir, { recursive: true });
+	return readdirSync(tracesDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && getTraceArtifactFilenameOwnerToken(entry.name) === ownerToken)
+		.flatMap((entry) => {
+			const path = join(tracesDir, entry.name);
+			let stat;
+			try {
+				stat = statSync(path);
+			} catch (err) {
+				if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT') {
+					return [];
+				}
+				throw err;
+			}
+			return { filename: entry.name, size: stat.size, createdAt: stat.mtimeMs };
+		})
+		.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function resolveTraceArtifactPath(userId: string, filename: string): string {
+	if (!TRACE_ARTIFACT_FILENAME_PATTERN.test(filename)) {
+		throw new Error('Invalid trace filename');
+	}
+	const ownerToken = getTraceArtifactOwnerToken(userId);
+	if (getTraceArtifactFilenameOwnerToken(filename) !== ownerToken) {
+		throw new Error('Trace artifact does not belong to this user');
+	}
+	return resolveAndValidateOutputPath(join(getTracesDir(), filename));
+}
+
+export function deleteTraceArtifact(userId: string, filename: string): boolean {
+	const filePath = resolveTraceArtifactPath(userId, filename);
+	unlinkSync(filePath);
+	return true;
 }
 
 export async function startTracing(
@@ -59,9 +132,35 @@ export async function startTracing(
 	if (MAX_TRACE_DURATION > 0) {
 		state.timer = setTimeout(async () => {
 			try {
+				const activeState = states.get(userId);
+				if (activeState?.stopPromise) {
+					try {
+						await activeState.stopPromise;
+					} catch {
+						// Manual stop failed; fall through to auto-stop if still active.
+					}
+				}
+				if (activeState?.chunkStopPromise) {
+					try {
+						await activeState.chunkStopPromise;
+					} catch {
+						// Chunk stop failed; fall through to auto-stop if tracing is still active.
+					}
+				}
 				if (states.get(userId)?.active) {
 					const path = defaultPath(userId);
-					await context.tracing.stop({ path });
+					const currentState = states.get(userId);
+					if (currentState) {
+						const stopPromise = context.tracing.stop({ path });
+						currentState.stopPromise = stopPromise;
+						try {
+							await stopPromise;
+						} finally {
+							if (currentState.stopPromise === stopPromise) {
+								delete currentState.stopPromise;
+							}
+						}
+					}
 				}
 			} catch {
 				// ignore if context already closed
@@ -79,19 +178,40 @@ export async function stopTracing(
 	context: BrowserContext,
 	outputPath?: string,
 ): Promise<{ path: string; size: number; alreadyStopped?: boolean }> {
-	const state = states.get(userId);
+	let state = states.get(userId);
 	if (!state?.active) {
 		throw new Error('No active tracing for this user');
 	}
 
-	if (state.timer) {
-		clearTimeout(state.timer);
+	if (state.stopPromise) {
+		try {
+			await state.stopPromise;
+		} catch {
+			// The in-flight stop failed; continue below if tracing is still active.
+		}
+		state = states.get(userId);
+		if (!state?.active) {
+			return { path: '', size: 0, alreadyStopped: true };
+		}
+	}
+	if (state.chunkStopPromise) {
+		try {
+			await state.chunkStopPromise;
+		} catch {
+			// The in-flight chunk stop failed; continue below if tracing is still active.
+		}
+		state = states.get(userId);
+		if (!state?.active) {
+			return { path: '', size: 0, alreadyStopped: true };
+		}
 	}
 
-	const path = outputPath ? resolveAndValidateOutputPath(outputPath) : defaultPath(userId);
+	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
+	const stopPromise = context.tracing.stop({ path });
+	state.stopPromise = stopPromise;
 	try {
-		await context.tracing.stop({ path });
+		await stopPromise;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		if (message.includes('Must start tracing')) {
@@ -102,6 +222,13 @@ export async function stopTracing(
 			return { path: '', size: 0, alreadyStopped: true };
 		}
 		throw err;
+	} finally {
+		if (state.stopPromise === stopPromise) {
+			delete state.stopPromise;
+		}
+	}
+	if (state.timer) {
+		clearTimeout(state.timer);
 	}
 	states.delete(userId);
 	const size = statSync(path).size;
@@ -130,13 +257,26 @@ export async function stopTracingChunk(
 	if (!state?.chunkActive) {
 		throw new Error('No active chunk');
 	}
+	if (state.chunkStopPromise) {
+		return state.chunkStopPromise;
+	}
 
-	const path = outputPath ? resolveAndValidateOutputPath(outputPath) : defaultPath(userId);
+	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
-	await context.tracing.stopChunk({ path });
-	state.chunkActive = false;
-	const size = statSync(path).size;
-	return { path, size };
+	const chunkStopPromise = (async () => {
+		await context.tracing.stopChunk({ path });
+		state.chunkActive = false;
+		const size = statSync(path).size;
+		return { path, size };
+	})();
+	state.chunkStopPromise = chunkStopPromise;
+	try {
+		return await chunkStopPromise;
+	} finally {
+		if (state.chunkStopPromise === chunkStopPromise) {
+			delete state.chunkStopPromise;
+		}
+	}
 }
 
 export function getTracingState(userId: string): { active: boolean; chunkActive: boolean; startedAt: number | null } {
