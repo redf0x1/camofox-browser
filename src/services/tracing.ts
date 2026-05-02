@@ -63,9 +63,17 @@ export function listTraceArtifacts(userId: string): Array<{ filename: string; si
 	mkdirSync(TRACES_DIR, { recursive: true });
 	return readdirSync(TRACES_DIR, { withFileTypes: true })
 		.filter((entry) => entry.isFile() && getTraceArtifactFilenameOwnerToken(entry.name) === ownerToken)
-		.map((entry) => {
+		.flatMap((entry) => {
 			const path = join(TRACES_DIR, entry.name);
-			const stat = statSync(path);
+			let stat;
+			try {
+				stat = statSync(path);
+			} catch (err) {
+				if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT') {
+					return [];
+				}
+				throw err;
+			}
 			return { filename: entry.name, size: stat.size, createdAt: stat.mtimeMs };
 		})
 		.sort((a, b) => b.createdAt - a.createdAt);

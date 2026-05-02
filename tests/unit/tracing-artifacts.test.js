@@ -75,6 +75,40 @@ describe('tracing artifact helpers', () => {
     ]);
   });
 
+  test('listTraceArtifacts() skips entries that vanish before stat', () => {
+    fs.readdirSync.mockReturnValue([
+      { name: `${userOneToken}-100.zip`, isFile: () => true },
+      { name: `${userOneToken}-200.zip`, isFile: () => true },
+    ]);
+    fs.statSync.mockImplementation((artifactPath) => {
+      if (artifactPath === `${TRACES_DIR}/${userOneToken}-100.zip`) {
+        const err = new Error('gone');
+        err.code = 'ENOENT';
+        throw err;
+      }
+      return { size: 200, mtimeMs: 2000 };
+    });
+
+    expect(listTraceArtifacts('user/one')).toEqual([
+      {
+        filename: `${userOneToken}-200.zip`,
+        size: 200,
+        createdAt: 2000,
+      },
+    ]);
+  });
+
+  test('listTraceArtifacts() rethrows unexpected stat errors', () => {
+    fs.readdirSync.mockReturnValue([{ name: `${userOneToken}-300.zip`, isFile: () => true }]);
+    fs.statSync.mockImplementation(() => {
+      const err = new Error('permission denied');
+      err.code = 'EACCES';
+      throw err;
+    });
+
+    expect(() => listTraceArtifacts('user/one')).toThrow('permission denied');
+  });
+
   test('colliding user ids cannot access each other trace artifacts', () => {
     expect(() => deleteTraceArtifact('user/one', '../escape.zip')).toThrow('Invalid trace filename');
     expect(() => deleteTraceArtifact('user/one', `${userUnderscoreToken}-1.zip`)).toThrow(
