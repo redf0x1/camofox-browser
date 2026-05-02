@@ -3,6 +3,7 @@ const path = require('node:path');
 const { startServer, stopServer, getServerUrl } = require('../helpers/startServer');
 const { startTestSite, stopTestSite, getTestSiteUrl } = require('../helpers/testSite');
 const { createClient } = require('../helpers/client');
+const { loadConfig } = require('../../dist/src/utils/config');
 
 function buildAuthHeaders() {
   if (!process.env.CAMOFOX_API_KEY) return {};
@@ -70,6 +71,54 @@ describe('Tracing artifacts', () => {
 
       const afterDelete = await client.listTraces();
       expect(afterDelete.traces.map((trace) => trace.filename)).not.toContain(filename);
+    } finally {
+      await client.cleanup();
+    }
+  }, 120000);
+
+  test('trace stop ignores caller-supplied artifact basenames that spoof another user token', async () => {
+    const client = createClient(serverUrl);
+    const otherClient = createClient(serverUrl);
+
+    try {
+      const { tabId } = await client.createTab(`${testSiteUrl}/pageA`);
+      const spoofedFilename = `${Buffer.from(otherClient.userId, 'utf8').toString('base64url')}-${Date.now()}.zip`;
+      const spoofedPath = path.join(loadConfig().tracesDir, spoofedFilename);
+      const ownerToken = Buffer.from(client.userId, 'utf8').toString('base64url');
+
+      await client.request('POST', `/tabs/${tabId}/trace/start`, { userId: client.userId });
+
+      const stopped = await client.request('POST', `/tabs/${tabId}/trace/stop`, {
+        userId: client.userId,
+        path: spoofedPath,
+      });
+
+      expect(stopped.ok).toBe(true);
+      expect(stopped.filename).toMatch(new RegExp(`^${ownerToken}-\\d+\\.zip$`));
+      expect(stopped.filename).not.toBe(spoofedFilename);
+      expect(path.dirname(stopped.path)).toBe(path.resolve(loadConfig().tracesDir));
+    } finally {
+      await client.cleanup();
+      await otherClient.cleanup();
+    }
+  }, 120000);
+
+  test('trace stop keeps managed artifacts inside the traces directory when path equals the traces root', async () => {
+    const client = createClient(serverUrl);
+
+    try {
+      const { tabId } = await client.createTab(`${testSiteUrl}/pageA`);
+      const tracesDir = loadConfig().tracesDir;
+
+      await client.request('POST', `/tabs/${tabId}/trace/start`, { userId: client.userId });
+
+      const stopped = await client.request('POST', `/tabs/${tabId}/trace/stop`, {
+        userId: client.userId,
+        path: tracesDir,
+      });
+
+      expect(stopped.ok).toBe(true);
+      expect(path.dirname(stopped.path)).toBe(path.resolve(tracesDir));
     } finally {
       await client.cleanup();
     }

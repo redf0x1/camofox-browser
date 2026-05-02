@@ -108,6 +108,7 @@ function getTracingErrorStatus(err: unknown): number {
 	if (message.includes('Tracing not started')) return 400;
 	if (message.includes('Chunk already active')) return 409;
 	if (message.includes('No active chunk')) return 400;
+	if (message.includes('Invalid trace output path')) return 400;
 	return 500;
 }
 

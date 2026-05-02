@@ -1,11 +1,11 @@
 import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import type { BrowserContext } from 'playwright-core';
 import { loadConfig } from '../utils/config';
 
 const CONFIG = loadConfig();
-const TRACES_DIR = CONFIG.tracesDir;
+const TRACES_DIR = resolve(CONFIG.tracesDir);
 const MAX_TRACE_DURATION = CONFIG.traceMaxDurationMs;
 const TRACE_ARTIFACT_FILENAME_PATTERN = /^([A-Za-z0-9_-]+)-\d+\.zip$/;
 
@@ -47,6 +47,16 @@ function resolveAndValidateOutputPath(outputPath: string): string {
 		throw new Error('Invalid trace output path: must be within traces directory');
 	}
 	return resolvedPath;
+}
+
+function resolveManagedTraceOutputPath(userId: string, outputPath?: string): string {
+	if (!outputPath) {
+		return defaultPath(userId);
+	}
+
+	const resolvedPath = resolveAndValidateOutputPath(outputPath);
+	const targetDir = resolvedPath === TRACES_DIR ? TRACES_DIR : dirname(resolvedPath);
+	return join(targetDir, buildTraceArtifactFilename(userId));
 }
 
 export function listTraceArtifacts(userId: string): Array<{ filename: string; size: number; createdAt: number }> {
@@ -131,7 +141,7 @@ export async function stopTracing(
 		clearTimeout(state.timer);
 	}
 
-	const path = outputPath ? resolveAndValidateOutputPath(outputPath) : defaultPath(userId);
+	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
 	try {
 		await context.tracing.stop({ path });
@@ -174,7 +184,7 @@ export async function stopTracingChunk(
 		throw new Error('No active chunk');
 	}
 
-	const path = outputPath ? resolveAndValidateOutputPath(outputPath) : defaultPath(userId);
+	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
 	await context.tracing.stopChunk({ path });
 	state.chunkActive = false;

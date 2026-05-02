@@ -111,4 +111,33 @@ describe('tracing artifact helpers', () => {
       'Invalid trace filename',
     );
   });
+
+  test('stopTracing() keeps managed artifacts inside the traces root when config has a trailing slash', async () => {
+    jest.resetModules();
+    jest.doMock('../../dist/src/utils/config', () => ({
+      loadConfig: () => ({
+        tracesDir: `${mockTracesDir}/`,
+        traceMaxDurationMs: 30_000,
+      }),
+    }));
+
+    fs = require('node:fs');
+    fs.statSync.mockReturnValue({ size: 123 });
+
+    const { startTracing, stopTracing } = require('../../dist/src/services/tracing');
+    const context = {
+      tracing: {
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await startTracing('user/one', context);
+    const result = await stopTracing('user/one', context, `${mockTracesDir}/`);
+
+    expect(path.dirname(result.path)).toBe(mockTracesDir);
+    expect(context.tracing.stop).toHaveBeenCalledWith({
+      path: expect.stringMatching(new RegExp(`^${mockTracesDir}/${userOneToken}-\\d+\\.zip$`)),
+    });
+  });
 });
