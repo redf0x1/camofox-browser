@@ -18,9 +18,19 @@ jest.mock('node:fs', () => ({
 }));
 
 describe('tracing.ts config safety', () => {
+  let fakeTimersEnabled = false;
+
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    fakeTimersEnabled = false;
+  });
+
+  afterEach(() => {
+    if (fakeTimersEnabled) {
+      jest.runOnlyPendingTimers();
+    }
+    jest.useRealTimers();
   });
 
   test('can be imported when mocked config omits tracesDir until trace artifacts are used', () => {
@@ -83,6 +93,112 @@ describe('tracing.ts config safety', () => {
       active: true,
       chunkActive: false,
       startedAt: expect.any(Number),
+    });
+  });
+
+  test('stopTracing() preserves timeout cleanup when path validation fails', async () => {
+    jest.useFakeTimers();
+    fakeTimersEnabled = true;
+
+    const { startTracing, stopTracing, getTracingState } = require('../../dist/src/services/tracing');
+    const context = {
+      tracing: {
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await startTracing('user-a', context);
+
+    await expect(stopTracing('user-a', context, '/outside-traces/trace.zip')).rejects.toThrow(
+      'Invalid trace output path: must be within traces directory',
+    );
+    expect(getTracingState('user-a')).toEqual({
+      active: true,
+      chunkActive: false,
+      startedAt: expect.any(Number),
+    });
+
+    await jest.advanceTimersByTimeAsync(30_000);
+
+    expect(context.tracing.stop).toHaveBeenCalledTimes(1);
+    expect(getTracingState('user-a')).toEqual({
+      active: false,
+      chunkActive: false,
+      startedAt: null,
+    });
+  });
+
+  test('stopTracing() preserves timeout cleanup when tracing.stop() fails unexpectedly', async () => {
+    jest.useFakeTimers();
+    fakeTimersEnabled = true;
+
+    const { startTracing, stopTracing, getTracingState } = require('../../dist/src/services/tracing');
+    const context = {
+      tracing: {
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest
+          .fn()
+          .mockRejectedValueOnce(new Error('disk full'))
+          .mockResolvedValueOnce(undefined),
+      },
+    };
+
+    await startTracing('user-a', context);
+
+    await expect(stopTracing('user-a', context)).rejects.toThrow('disk full');
+    expect(getTracingState('user-a')).toEqual({
+      active: true,
+      chunkActive: false,
+      startedAt: expect.any(Number),
+    });
+
+    await jest.advanceTimersByTimeAsync(30_000);
+
+    expect(context.tracing.stop).toHaveBeenCalledTimes(2);
+    expect(getTracingState('user-a')).toEqual({
+      active: false,
+      chunkActive: false,
+      startedAt: null,
+    });
+  });
+
+  test('stopTracing() does not race the timeout auto-stop while a manual stop is in progress', async () => {
+    jest.useFakeTimers();
+    fakeTimersEnabled = true;
+
+    const { startTracing, stopTracing, getTracingState } = require('../../dist/src/services/tracing');
+    let resolveStop;
+    const stopGate = new Promise((resolve) => {
+      resolveStop = resolve;
+    });
+    const context = {
+      tracing: {
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn().mockImplementation(() => stopGate),
+      },
+    };
+
+    await startTracing('user-a', context);
+
+    const stopPromise = stopTracing('user-a', context);
+    await Promise.resolve();
+
+    expect(context.tracing.stop).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(30_000);
+
+    expect(context.tracing.stop).toHaveBeenCalledTimes(1);
+
+    resolveStop(undefined);
+    await expect(stopPromise).resolves.toEqual({
+      path: expect.stringMatching(new RegExp(`^${fallbackTracesDir}/.+-\\d+\\.zip$`)),
+      size: 123,
+    });
+    expect(getTracingState('user-a')).toEqual({
+      active: false,
+      chunkActive: false,
+      startedAt: null,
     });
   });
 });

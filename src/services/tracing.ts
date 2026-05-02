@@ -14,6 +14,7 @@ interface TracingState {
 	chunkActive: boolean;
 	startedAt: number;
 	timer?: ReturnType<typeof setTimeout>;
+	stopPromise?: Promise<void>;
 }
 
 const states = new Map<string, TracingState>();
@@ -130,9 +131,28 @@ export async function startTracing(
 	if (MAX_TRACE_DURATION > 0) {
 		state.timer = setTimeout(async () => {
 			try {
+				const activeState = states.get(userId);
+				if (activeState?.stopPromise) {
+					try {
+						await activeState.stopPromise;
+					} catch {
+						// Manual stop failed; fall through to auto-stop if still active.
+					}
+				}
 				if (states.get(userId)?.active) {
 					const path = defaultPath(userId);
-					await context.tracing.stop({ path });
+					const currentState = states.get(userId);
+					if (currentState) {
+						const stopPromise = context.tracing.stop({ path });
+						currentState.stopPromise = stopPromise;
+						try {
+							await stopPromise;
+						} finally {
+							if (currentState.stopPromise === stopPromise) {
+								delete currentState.stopPromise;
+							}
+						}
+					}
 				}
 			} catch {
 				// ignore if context already closed
@@ -150,19 +170,29 @@ export async function stopTracing(
 	context: BrowserContext,
 	outputPath?: string,
 ): Promise<{ path: string; size: number; alreadyStopped?: boolean }> {
-	const state = states.get(userId);
+	let state = states.get(userId);
 	if (!state?.active) {
 		throw new Error('No active tracing for this user');
 	}
 
-	if (state.timer) {
-		clearTimeout(state.timer);
+	if (state.stopPromise) {
+		try {
+			await state.stopPromise;
+		} catch {
+			// The in-flight stop failed; continue below if tracing is still active.
+		}
+		state = states.get(userId);
+		if (!state?.active) {
+			return { path: '', size: 0, alreadyStopped: true };
+		}
 	}
 
 	const path = resolveManagedTraceOutputPath(userId, outputPath);
 	ensureOutputDir(path);
+	const stopPromise = context.tracing.stop({ path });
+	state.stopPromise = stopPromise;
 	try {
-		await context.tracing.stop({ path });
+		await stopPromise;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		if (message.includes('Must start tracing')) {
@@ -173,6 +203,13 @@ export async function stopTracing(
 			return { path: '', size: 0, alreadyStopped: true };
 		}
 		throw err;
+	} finally {
+		if (state.stopPromise === stopPromise) {
+			delete state.stopPromise;
+		}
+	}
+	if (state.timer) {
+		clearTimeout(state.timer);
 	}
 	states.delete(userId);
 	const size = statSync(path).size;
