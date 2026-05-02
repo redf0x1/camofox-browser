@@ -352,7 +352,6 @@ export async function extractImages(
 	params: Pick<ExtractResourcesParams, 'selector' | 'extensions' | 'resolveBlobs' | 'triggerLazyLoad'>,
 ): Promise<ExtractResourcesResult> {
 	return extractResources(page, {
-		userId: '',
 		...params,
 		types: ['images'],
 	});

@@ -130,4 +130,20 @@ describe('resource-extractor images (unit)', () => {
     );
     expect(result.metadata.blobsResolved).toBe(1);
   });
+
+  test('extractImages() does not require a fake userId shim', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '../../src/services/resource-extractor.ts'),
+      'utf8',
+    );
+    const typesSource = fs.readFileSync(
+      path.join(__dirname, '../../src/types.ts'),
+      'utf8',
+    );
+
+    expect(typesSource).toContain('userId?: string;');
+    expect(source).not.toContain("userId: ''");
+  });
 });
+const fs = require('node:fs');
+const path = require('node:path');

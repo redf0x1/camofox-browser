@@ -175,7 +175,7 @@ export interface ExtractionMetadata {
 }
 
 export interface ExtractResourcesParams {
-  userId: string;
+  userId?: string;
   selector?: string;
   types?: ('images' | 'links' | 'media' | 'documents')[];
   extensions?: string[];
