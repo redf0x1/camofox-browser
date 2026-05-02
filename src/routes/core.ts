@@ -68,7 +68,7 @@ import {
 	cleanupUserDownloads,
 	markDownloadsStaged,
 } from '../services/download';
-import { extractResources, resolveBlob } from '../services/resource-extractor';
+import { extractImages, extractResources, resolveBlob } from '../services/resource-extractor';
 import { batchDownload } from '../services/batch-downloader';
 import {
 	startTracing,
@@ -982,6 +982,74 @@ router.get('/tabs/:tabId/screenshot', async (req: Request<{ tabId: string }, unk
 		return res.status(500).json({ error: safeError(err) });
 	}
 });
+
+// Images
+router.get(
+	'/tabs/:tabId/images',
+	async (
+		req: Request<
+			{ tabId: string },
+			unknown,
+			unknown,
+			{ userId?: unknown; selector?: unknown; extensions?: unknown; resolveBlobs?: unknown; triggerLazyLoad?: unknown }
+		>,
+		res: Response,
+	) => {
+		try {
+			const userId = req.query.userId;
+			const found = findTabById(req.params.tabId, userId);
+			if (!found) {
+				log('warn', 'images: tab not found', { reqId: req.reqId, tabId: req.params.tabId, userId });
+				return res.status(404).json({ error: 'Tab not found' });
+			}
+
+			const selector = typeof req.query.selector === 'string' && req.query.selector ? req.query.selector : undefined;
+			const extensions = Array.isArray(req.query.extensions)
+				? req.query.extensions.map((value) => String(value)).filter(Boolean)
+				: typeof req.query.extensions === 'string' && req.query.extensions
+					? req.query.extensions
+							.split(',')
+							.map((value) => value.trim())
+							.filter(Boolean)
+					: undefined;
+			const resolveBlobs = String(req.query.resolveBlobs || '').toLowerCase() === 'true';
+			const triggerLazyLoad = String(req.query.triggerLazyLoad || '').toLowerCase() === 'true';
+
+			const { tabState } = found;
+			tabState.toolCalls++;
+
+			const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+				withTimeout(
+					withTabLock(req.params.tabId, async () =>
+						extractImages(tabState.page, {
+							selector,
+							extensions,
+							resolveBlobs,
+							triggerLazyLoad,
+						}),
+					),
+					CONFIG.handlerTimeoutMs,
+					'images',
+				),
+			);
+
+			return res.json({
+				ok: result.ok,
+				container: result.container,
+				images: result.resources.images,
+				totals: {
+					images: result.totals.images,
+					total: result.totals.images,
+				},
+				metadata: result.metadata,
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'images failed', { reqId: req.reqId, error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
 
 // Stats
 router.get('/tabs/:tabId/stats', async (req: Request<{ tabId: string }, unknown, unknown, { userId?: unknown }>, res: Response) => {

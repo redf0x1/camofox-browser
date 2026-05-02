@@ -142,6 +142,24 @@ class BrowserClient {
     if (options.offset) params.append('offset', options.offset);
     return this.request('GET', `/tabs/${tabId}/links?${params}`);
   }
+
+  async getImages(tabId, options = {}) {
+    const params = new URLSearchParams({ userId: this.userId });
+    if (options.selector) params.append('selector', options.selector);
+    if (options.resolveBlobs !== undefined) params.append('resolveBlobs', String(options.resolveBlobs));
+    if (options.triggerLazyLoad !== undefined) params.append('triggerLazyLoad', String(options.triggerLazyLoad));
+
+    const extensions = Array.isArray(options.extensions)
+      ? options.extensions
+      : typeof options.extensions === 'string'
+        ? options.extensions.split(',')
+        : [];
+    for (const extension of extensions.map((value) => String(value).trim()).filter(Boolean)) {
+      params.append('extensions', extension);
+    }
+
+    return this.request('GET', `/tabs/${tabId}/images?${params}`);
+  }
   
   async getStats(tabId) {
     return this.request('GET', `/tabs/${tabId}/stats?userId=${this.userId}`);
