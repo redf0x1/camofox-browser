@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import type { BrowserContext } from 'playwright-core';
@@ -34,6 +34,36 @@ function resolveAndValidateOutputPath(outputPath: string): string {
 		throw new Error('Invalid trace output path: must be within traces directory');
 	}
 	return resolvedPath;
+}
+
+export function listTraceArtifacts(userId: string): Array<{ filename: string; path: string; size: number; createdAt: number }> {
+	const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
+	mkdirSync(TRACES_DIR, { recursive: true });
+	return readdirSync(TRACES_DIR, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && entry.name.startsWith(`${safeUserId}-`) && entry.name.endsWith('.zip'))
+		.map((entry) => {
+			const path = join(TRACES_DIR, entry.name);
+			const stat = statSync(path);
+			return { filename: entry.name, path, size: stat.size, createdAt: stat.mtimeMs };
+		})
+		.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function resolveTraceArtifactPath(userId: string, filename: string): string {
+	if (!/^[a-zA-Z0-9_.-]+\.zip$/.test(filename) || filename.includes('..') || filename.includes('/')) {
+		throw new Error('Invalid trace filename');
+	}
+	const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
+	if (!filename.startsWith(`${safeUserId}-`)) {
+		throw new Error('Trace artifact does not belong to this user');
+	}
+	return resolveAndValidateOutputPath(join(TRACES_DIR, filename));
+}
+
+export function deleteTraceArtifact(userId: string, filename: string): boolean {
+	const filePath = resolveTraceArtifactPath(userId, filename);
+	unlinkSync(filePath);
+	return true;
 }
 
 export async function startTracing(

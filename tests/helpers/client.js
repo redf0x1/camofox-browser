@@ -164,6 +164,14 @@ class BrowserClient {
   async closeSession() {
     return this.request('DELETE', `/sessions/${this.userId}`);
   }
+
+  async listTraces() {
+    return this.request('GET', `/sessions/${this.userId}/traces`);
+  }
+
+  async deleteTrace(filename) {
+    return this.request('DELETE', `/sessions/${this.userId}/traces/${encodeURIComponent(filename)}`);
+  }
   
   // Cleanup all tabs created by this client
   async cleanup() {

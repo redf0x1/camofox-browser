@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 
 import express, { Router, type Request, type Response } from 'express';
 
@@ -76,6 +76,9 @@ import {
 	startTracingChunk,
 	stopTracingChunk,
 	getTracingState,
+	listTraceArtifacts,
+	resolveTraceArtifactPath,
+	deleteTraceArtifact,
 } from '../services/tracing';
 
 import type { CookieInput, ContextOverrides, TabState } from '../types';
@@ -105,6 +108,14 @@ function getTracingErrorStatus(err: unknown): number {
 	if (message.includes('Tracing not started')) return 400;
 	if (message.includes('Chunk already active')) return 409;
 	if (message.includes('No active chunk')) return 400;
+	return 500;
+}
+
+function getTraceArtifactErrorStatus(err: unknown): number {
+	const message = err instanceof Error ? err.message : String(err);
+	if (message.includes('Invalid trace filename')) return 400;
+	if (message.includes('does not belong to this user')) return 404;
+	if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT') return 404;
 	return 500;
 }
 
@@ -1411,12 +1422,13 @@ router.post('/tabs/:tabId/trace/stop', async (req, res) => {
 			return res.json({
 				ok: true,
 				path: result.path,
+				filename: result.path ? basename(result.path) : undefined,
 				size: result.size,
 				alreadyStopped: true,
 				message: 'Trace was already stopped by chunk stop',
 			});
 		}
-		return res.json({ ok: true, ...result });
+		return res.json({ ok: true, ...result, filename: basename(result.path) });
 	} catch (err) {
 		const status = getTracingErrorStatus(err);
 		return res.status(status).json({ ok: false, error: safeError(err) });
@@ -1470,7 +1482,7 @@ router.post('/tabs/:tabId/trace/chunk/stop', async (req, res) => {
 		if (!tab) return res.status(404).json({ ok: false, error: 'Tab not found' });
 
 		const result = await stopTracingChunk(userId, tab.page.context(), path);
-		return res.json({ ok: true, ...result });
+		return res.json({ ok: true, ...result, filename: basename(result.path) });
 	} catch (err) {
 		const status = getTracingErrorStatus(err);
 		return res.status(status).json({ ok: false, error: safeError(err) });
@@ -1497,6 +1509,72 @@ router.get('/tabs/:tabId/trace/status', async (req, res) => {
 		return res.json({ ok: true, ...state });
 	} catch (err) {
 		return res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+router.get('/sessions/:userId/traces', async (req, res) => {
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const userId = normalizeUserId(req.params.userId);
+		return res.json({ ok: true, traces: listTraceArtifacts(userId) });
+	} catch (err) {
+		return res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+router.get('/sessions/:userId/traces/:filename', async (req, res) => {
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const userId = normalizeUserId(req.params.userId);
+		const filename = req.params.filename;
+		const filePath = resolveTraceArtifactPath(userId, filename);
+		if (!fs.existsSync(filePath)) {
+			return res.status(404).json({ ok: false, error: 'Trace artifact not found' });
+		}
+
+		const safeName = filename.replace(/[\r\n\0"]/g, '');
+		res.setHeader('Content-Type', 'application/zip');
+		res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+
+		const stream = fs.createReadStream(filePath);
+		stream.on('error', (streamErr) => {
+			if (!res.headersSent) {
+				const status = getTraceArtifactErrorStatus(streamErr);
+				res.status(status).json({ ok: false, error: safeError(streamErr) });
+			}
+			res.destroy();
+		});
+		stream.pipe(res);
+	} catch (err) {
+		const status = getTraceArtifactErrorStatus(err);
+		return res.status(status).json({ ok: false, error: safeError(err) });
+	}
+});
+
+router.delete('/sessions/:userId/traces/:filename', async (req, res) => {
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const userId = normalizeUserId(req.params.userId);
+		const filename = req.params.filename;
+		const filePath = resolveTraceArtifactPath(userId, filename);
+		if (!fs.existsSync(filePath)) {
+			return res.status(404).json({ ok: false, error: 'Trace artifact not found' });
+		}
+
+		deleteTraceArtifact(userId, filename);
+		return res.json({ ok: true });
+	} catch (err) {
+		const status = getTraceArtifactErrorStatus(err);
+		return res.status(status).json({ ok: false, error: safeError(err) });
 	}
 });
 
