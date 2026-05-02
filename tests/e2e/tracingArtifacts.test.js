@@ -44,6 +44,7 @@ describe('Tracing artifacts', () => {
 
       const listed = await client.listTraces();
       expect(listed.ok).toBe(true);
+      expect(listed.traces[0]).not.toHaveProperty('path');
       expect(listed.traces).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

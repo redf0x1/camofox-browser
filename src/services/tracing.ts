@@ -17,10 +17,22 @@ interface TracingState {
 
 const states = new Map<string, TracingState>();
 
+function getTraceArtifactOwnerToken(userId: string): string {
+	return Buffer.from(userId, 'utf8').toString('base64url');
+}
+
+function buildTraceArtifactFilename(userId: string): string {
+	return `${getTraceArtifactOwnerToken(userId)}-${Date.now()}.zip`;
+}
+
+function getTraceArtifactFilenameOwnerToken(filename: string): string | null {
+	const match = /^([A-Za-z0-9_-]+)-\d+\.zip$/.exec(filename);
+	return match ? match[1] : null;
+}
+
 function defaultPath(userId: string): string {
 	mkdirSync(TRACES_DIR, { recursive: true });
-	const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
-	return join(TRACES_DIR, `${safeUserId}-${Date.now()}.zip`);
+	return join(TRACES_DIR, buildTraceArtifactFilename(userId));
 }
 
 function ensureOutputDir(path: string): void {
@@ -36,15 +48,15 @@ function resolveAndValidateOutputPath(outputPath: string): string {
 	return resolvedPath;
 }
 
-export function listTraceArtifacts(userId: string): Array<{ filename: string; path: string; size: number; createdAt: number }> {
-	const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
+export function listTraceArtifacts(userId: string): Array<{ filename: string; size: number; createdAt: number }> {
+	const ownerToken = getTraceArtifactOwnerToken(userId);
 	mkdirSync(TRACES_DIR, { recursive: true });
 	return readdirSync(TRACES_DIR, { withFileTypes: true })
-		.filter((entry) => entry.isFile() && entry.name.startsWith(`${safeUserId}-`) && entry.name.endsWith('.zip'))
+		.filter((entry) => entry.isFile() && getTraceArtifactFilenameOwnerToken(entry.name) === ownerToken)
 		.map((entry) => {
 			const path = join(TRACES_DIR, entry.name);
 			const stat = statSync(path);
-			return { filename: entry.name, path, size: stat.size, createdAt: stat.mtimeMs };
+			return { filename: entry.name, size: stat.size, createdAt: stat.mtimeMs };
 		})
 		.sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -53,8 +65,8 @@ export function resolveTraceArtifactPath(userId: string, filename: string): stri
 	if (!/^[a-zA-Z0-9_.-]+\.zip$/.test(filename) || filename.includes('..') || filename.includes('/')) {
 		throw new Error('Invalid trace filename');
 	}
-	const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
-	if (!filename.startsWith(`${safeUserId}-`)) {
+	const ownerToken = getTraceArtifactOwnerToken(userId);
+	if (getTraceArtifactFilenameOwnerToken(filename) !== ownerToken) {
 		throw new Error('Trace artifact does not belong to this user');
 	}
 	return resolveAndValidateOutputPath(join(TRACES_DIR, filename));

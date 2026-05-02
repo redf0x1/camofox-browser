@@ -26,6 +26,10 @@ describe('tracing artifact helpers', () => {
   let deleteTraceArtifact;
 
   const TRACES_DIR = mockTracesDir;
+  const userOneToken = Buffer.from('user/one').toString('base64url');
+  const userUnderscoreToken = Buffer.from('user_one').toString('base64url');
+  const prefixUserToken = Buffer.from('\u00A0').toString('base64url');
+  const prefixedUserToken = Buffer.from('\u00A0>').toString('base64url');
 
   beforeEach(() => {
     jest.resetModules();
@@ -34,18 +38,18 @@ describe('tracing artifact helpers', () => {
     ({ listTraceArtifacts, deleteTraceArtifact } = require('../../dist/src/services/tracing'));
   });
 
-  test('listTraceArtifacts() returns only zip files belonging to the user prefix', () => {
+  test('listTraceArtifacts() returns only zip files belonging to the exact user ownership token', () => {
     fs.readdirSync.mockReturnValue([
-      { name: 'user_one-300.zip', isFile: () => true },
-      { name: 'user_one-200.zip', isFile: () => true },
-      { name: 'user_one-not-a-zip.txt', isFile: () => true },
-      { name: 'user_two-999.zip', isFile: () => true },
-      { name: 'user_one-100.zip', isFile: () => false },
+      { name: `${userOneToken}-300.zip`, isFile: () => true },
+      { name: `${userOneToken}-200.zip`, isFile: () => true },
+      { name: `${userOneToken}-not-a-zip.txt`, isFile: () => true },
+      { name: `${userUnderscoreToken}-999.zip`, isFile: () => true },
+      { name: `${userOneToken}-100.zip`, isFile: () => false },
     ]);
     fs.statSync.mockImplementation((artifactPath) => {
       const stats = {
-        [`${TRACES_DIR}/user_one-300.zip`]: { size: 300, mtimeMs: 3000 },
-        [`${TRACES_DIR}/user_one-200.zip`]: { size: 200, mtimeMs: 2000 },
+        [`${TRACES_DIR}/${userOneToken}-300.zip`]: { size: 300, mtimeMs: 3000 },
+        [`${TRACES_DIR}/${userOneToken}-200.zip`]: { size: 200, mtimeMs: 2000 },
       };
       return stats[artifactPath];
     });
@@ -55,27 +59,47 @@ describe('tracing artifact helpers', () => {
     expect(fs.mkdirSync).toHaveBeenCalledWith(TRACES_DIR, { recursive: true });
     expect(artifacts).toEqual([
       {
-        filename: 'user_one-300.zip',
-        path: `${TRACES_DIR}/user_one-300.zip`,
+        filename: `${userOneToken}-300.zip`,
         size: 300,
         createdAt: 3000,
       },
       {
-        filename: 'user_one-200.zip',
-        path: `${TRACES_DIR}/user_one-200.zip`,
+        filename: `${userOneToken}-200.zip`,
         size: 200,
         createdAt: 2000,
       },
     ]);
   });
 
-  test('deleteTraceArtifact() rejects traversal and deletes a valid user-owned trace file', () => {
+  test('colliding user ids cannot access each other trace artifacts', () => {
     expect(() => deleteTraceArtifact('user/one', '../escape.zip')).toThrow('Invalid trace filename');
-    expect(() => deleteTraceArtifact('user/one', 'user_two-1.zip')).toThrow(
+    expect(() => deleteTraceArtifact('user/one', `${userUnderscoreToken}-1.zip`)).toThrow(
       'Trace artifact does not belong to this user',
     );
 
-    expect(deleteTraceArtifact('user/one', 'user_one-1.zip')).toBe(true);
-    expect(fs.unlinkSync).toHaveBeenCalledWith(`${TRACES_DIR}/user_one-1.zip`);
+    expect(deleteTraceArtifact('user/one', `${userOneToken}-1.zip`)).toBe(true);
+    expect(fs.unlinkSync).toHaveBeenCalledWith(`${TRACES_DIR}/${userOneToken}-1.zip`);
+  });
+
+  test('ownership checks reject tokens that merely share a prefix', () => {
+    fs.readdirSync.mockReturnValue([
+      { name: `${prefixUserToken}-100.zip`, isFile: () => true },
+      { name: `${prefixedUserToken}-200.zip`, isFile: () => true },
+    ]);
+    fs.statSync.mockImplementation((artifactPath) => {
+      const stats = {
+        [`${TRACES_DIR}/${prefixUserToken}-100.zip`]: { size: 100, mtimeMs: 1000 },
+        [`${TRACES_DIR}/${prefixedUserToken}-200.zip`]: { size: 200, mtimeMs: 2000 },
+      };
+      return stats[artifactPath];
+    });
+
+    expect(listTraceArtifacts('\u00A0')).toEqual([
+      {
+        filename: `${prefixUserToken}-100.zip`,
+        size: 100,
+        createdAt: 1000,
+      },
+    ]);
   });
 });
