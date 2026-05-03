@@ -419,7 +419,7 @@ export class ContextPool {
 
 		log('info', 'evicting persistent context (LRU)', { userId: lru.userId, profileDir: lru.profileDir });
 		this.notifyEviction(lru.userId);
-		await this.closeContext(lru.userId);
+		await this.closeContext(lru.profileKey);
 	}
 
 	async ensureContext(

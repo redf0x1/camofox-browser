@@ -121,4 +121,37 @@ describe('ContextPool proxy-geo identity', () => {
     // Cleanup
     await pool.closeContext('user-2::session-b::sig-y');
   });
+
+  test('closeContext removes entry by profileKey not userId', async () => {
+    const pool = new ContextPool();
+    
+    // Create 2 contexts for same user with different profileKeys
+    const alpha = await pool.ensureContext(
+      'user-3::alpha::sig-1',
+      'user-3',
+      { timezoneId: 'Asia/Tokyo' },
+    );
+    
+    const beta = await pool.ensureContext(
+      'user-3::beta::sig-2',
+      'user-3',
+      { timezoneId: 'Europe/Berlin' },
+    );
+    
+    // Both should exist
+    expect(pool.size()).toBe(2);
+    expect(pool.getEntry('user-3::alpha::sig-1')).toBeDefined();
+    expect(pool.getEntry('user-3::beta::sig-2')).toBeDefined();
+    
+    // Close by profileKey should remove only that specific entry
+    await pool.closeContext('user-3::alpha::sig-1');
+    
+    // Verify alpha is gone but beta remains
+    expect(pool.size()).toBe(1);
+    expect(pool.getEntry('user-3::alpha::sig-1')).toBeUndefined();
+    expect(pool.getEntry('user-3::beta::sig-2')).toBeDefined();
+    
+    // Cleanup
+    await pool.closeContext('user-3::beta::sig-2');
+  });
 });
