@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- **Session-level proxy and geo overrides** — `POST /tabs` and CLI `camofox open` now accept `proxyProfile` (named profile from `CAMOFOX_PROXY_PROFILES_FILE`) or raw `proxy` fields (`host`, `port`, `username`, `password`) for session-level proxy configuration
+- **Hybrid geo modes** — `geoMode=explicit-wins` (default, explicit geo fields remain authoritative) and `geoMode=proxy-locked` (requires proxy-derived geo and rejects conflicting explicit geo)
+- **Session-scoped proxy/geo identity** — proxy and geo configuration now scoped by `userId + sessionKey` instead of `userId` alone; same user may run parallel sessions with different proxy/geo profiles using different session keys
+- **Named proxy profiles** — `CAMOFOX_PROXY_PROFILES_FILE` environment variable points to JSON file defining reusable proxy profiles
+- **CLI proxy/geo flags** — `camofox open` supports `--proxy-profile`, `--proxy-host`, `--proxy-port`, `--proxy-username`, `--proxy-password`, and `--geo-mode` for session-level overrides
+- **OpenClaw proxy/geo support** — `/tabs/open` endpoint accepts same `proxyProfile`, `proxy`, and `geoMode` fields as core `/tabs` endpoint
+
+### Changed
+- **Session reuse and cleanup** now operate on `userId + sessionKey` scope for proxy/geo identity; conflicting proxy/geo requests for existing session profiles are rejected
+- **Context pool eviction** uses `profileKey` (derived from `userId + sessionKey + proxy + geo`) instead of `userId` alone; sibling sessions with different session keys survive individual eviction
+
 ### Security
 - Server bind now defaults to `127.0.0.1` via `CAMOFOX_HOST`, and startup refuses non-loopback binds unless `CAMOFOX_API_KEY` is configured.
 - Navigation target validation now blocks loopback/private/link-local/metadata hosts on non-loopback deployments by default, with an explicit `CAMOFOX_ALLOW_PRIVATE_NETWORK=true` override for trusted environments.
@@ -9,6 +21,7 @@
 
 ### Tests
 - Added regression coverage for bind-host safety, protected-route auth on loopback vs API-key deployments, and private-network URL validation.
+- Added E2E coverage for session-level proxy/geo overrides, geo mode behavior, session profile conflicts, and OpenClaw proxy/geo support.
 
 ## [2.3.0] - 2026-05-03
 
