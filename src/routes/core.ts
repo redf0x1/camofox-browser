@@ -910,11 +910,9 @@ router.post(
 			}
 
 			if (result.errorType === 'timeout') {
-				lifecycleController.recordInteractiveActivity();
 				return res.status(408).json(result);
 			}
 
-			lifecycleController.recordInteractiveActivity();
 			return res.status(500).json(result);
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
