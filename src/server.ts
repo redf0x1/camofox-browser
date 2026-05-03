@@ -17,6 +17,9 @@ import {
 	getAllSessions,
 	startCleanupInterval as startSessionCleanupInterval,
 	stopCleanupInterval as stopSessionCleanupInterval,
+	runLifecycleIdleCleanup,
+	getLifecycleSessionSnapshot,
+	getSessionsSnapshot,
 } from './services/session';
 import {
 	startCleanupInterval as startDownloadCleanupInterval,
@@ -115,6 +118,35 @@ server = app.listen(PORT, CONFIG.host, () => {
 		});
 	}, CONFIG.healthProbeIntervalMs);
 	healthProbeInterval.unref();
+
+	// Lifecycle idle cleanup check
+	setInterval(async () => {
+		const now = Date.now();
+		const sessionSnapshot = getLifecycleSessionSnapshot();
+		const contextSnapshot = contextPool.getLifecycleSnapshot();
+		lifecycleController.syncLiveState({
+			liveSessions: sessionSnapshot.liveSessions,
+			liveTabs: sessionSnapshot.liveTabs,
+			launchingContexts: contextSnapshot.launchingContexts,
+			stagedCreates: sessionSnapshot.stagedCreates,
+		});
+
+		if (lifecycleController.shouldRunCleanup(now)) {
+			lifecycleController.markCleanupStarted(now);
+			// Snapshot sessions and contexts atomically BEFORE async cleanup work
+			const sessionsToCheck = getSessionsSnapshot();
+			const contextsToCheck = contextPool.getPoolEntries();
+			try {
+				const result = await runLifecycleIdleCleanup(sessionsToCheck, contextsToCheck, now);
+				lifecycleController.markCleanupFinished('success', Date.now());
+				log('info', 'idle cleanup completed', result);
+			} catch (error) {
+				lifecycleController.markCleanupFinished('failed', Date.now());
+				log('error', 'idle cleanup failed', { error: safeError(error) });
+			}
+		}
+	}, 250);
+
 	if (!CONFIG.apiKey) {
 		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — protected endpoints are only intended for loopback-only deployments.');
 		console.warn('[camofox] Set CAMOFOX_API_KEY before binding CAMOFOX_HOST beyond localhost.');

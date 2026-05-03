@@ -29,6 +29,7 @@ export interface PoolEntry {
 	profileKey: string;
 	profileDir: string;
 	lastAccess: number;
+	createdAt: number;  // Timestamp when this entry was created
 	launching?: Promise<BrowserContext>;
 	staged?: boolean;
 	stagedGeneration?: string;
@@ -227,6 +228,10 @@ export class ContextPool {
 			launchingContexts,
 			stagedContexts,
 		};
+	}
+
+	getPoolEntries(): Map<string, PoolEntry> {
+		return new Map(this.pool);
 	}
 
 	private cleanupVirtualDisplay(entry: PoolEntry): void {
@@ -490,6 +495,7 @@ export class ContextPool {
 			profileKey,
 			profileDir,
 			lastAccess: Date.now(),
+			createdAt: Date.now(),
 			staged,
 			stagedGeneration,
 			proxyConfig: resolvedProxy || null,
@@ -536,9 +542,23 @@ export class ContextPool {
 			await entry.context?.close().catch(() => {});
 		} finally {
 			this.cleanupVirtualDisplay(entry);
-			this.pool.delete(normalized);
-			log('info', 'persistent context removed from pool', { userId: entry.userId, profileKey: normalized, profileDir: entry.profileDir });
+			// Only delete if this entry is still in the pool (avoid deleting a newer entry with same key)
+			const currentEntry = this.pool.get(normalized);
+			if (currentEntry === entry) {
+				this.pool.delete(normalized);
+				log('info', 'persistent context removed from pool', { userId: entry.userId, profileKey: normalized, profileDir: entry.profileDir });
+			} else {
+				log('info', 'persistent context closed but newer entry exists', { userId: entry.userId, profileKey: normalized, profileDir: entry.profileDir });
+			}
 		}
+	}
+
+	async closeContextIfMatches(profileKey: string, expectedCreatedAt: number): Promise<void> {
+		const normalized = String(profileKey);
+		const entry = this.pool.get(normalized);
+		if (!entry) return;
+		if (entry.createdAt !== expectedCreatedAt) return;
+		await this.closeContext(normalized);
 	}
 
 	async closeStagedContext(profileKey: string, generation?: string): Promise<void> {

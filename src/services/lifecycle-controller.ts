@@ -67,7 +67,6 @@ export class LifecycleController {
 
   private hasLiveActivity(): boolean {
     return (
-      this.liveState.liveSessions > 0 ||
       this.liveState.liveTabs > 0 ||
       this.liveState.launchingContexts > 0 ||
       this.liveState.stagedCreates > 0

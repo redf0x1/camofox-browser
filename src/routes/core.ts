@@ -333,6 +333,9 @@ router.post(
 				return res.status(403).json({ error: 'Forbidden' });
 			}
 
+			// Record activity at START to prevent idle cleanup race during tab creation
+			lifecycleController.recordInteractiveActivity();
+
 			const { userId, sessionKey, listItemId, url, preset, locale, timezoneId, geolocation, viewport } = req.body;
 			const { proxy, proxyProfile, geoMode } = req.body as {
 				proxy?: unknown;

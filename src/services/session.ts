@@ -118,7 +118,7 @@ export async function withUserLimit<T>(
 	}
 }
 
-function cleanupSessionsForUserId(userId: string, reason: string, clearCanonical = true): void {
+export function cleanupSessionsForUserId(userId: string, reason: string, clearCanonical = true): void {
 	const key = normalizeUserId(userId);
 	// If a session is currently being created, drop our reference so callers don't keep a stale placeholder.
 	launchingSessions.delete(key);
@@ -358,6 +358,10 @@ export function getLifecycleSessionSnapshot(): { liveSessions: number; liveTabs:
 		liveTabs: countTotalTabsForSessions(),
 		stagedCreates: launchingSessions.size,
 	};
+}
+
+export function getSessionsSnapshot(): Map<string, SessionData> {
+	return new Map(sessions);
 }
 
 export function getTabGroup(session: SessionData, sessionKey: string): Map<string, TabState> {
@@ -647,3 +651,59 @@ export function stopCleanupInterval(): void {
 		cleanupInterval = null;
 	}
 }
+
+/**
+ * Stage 1 idle cleanup: close runtime state (contexts, session data) for users with no tabs.
+ * Does NOT clear stored session profiles - they survive idle cleanup.
+ * Does NOT exit the daemon - that is Stage 2 (Task 4).
+ * @param sessionSnapshot Snapshot of sessions map taken before cleanup started
+ * @param contextSnapshot Snapshot of context pool entries taken before cleanup started
+ * @param cleanupStartedMs Timestamp when cleanup was triggered (used to avoid closing newly-created contexts)
+ */
+export async function runLifecycleIdleCleanup(
+	sessionSnapshot: Map<string, SessionData>,
+	contextSnapshot: Map<string, PoolEntry>,
+	cleanupStartedMs: number,
+): Promise<{ closedUsers: string[] }> {
+	const closedUsers: string[] = [];
+	
+	// Use the provided snapshots to avoid race with new context creation
+	const usersToCleanup = new Set<string>();
+	
+	for (const [userId, session] of sessionSnapshot.entries()) {
+		const tabCount = countTotalTabsForSessions([[userId, session]]);
+
+		// Only cleanup sessions with zero tabs
+		if (tabCount === 0) {
+			usersToCleanup.add(userId);
+		}
+	}
+	
+	// Close only the specific contexts from the snapshot that were created before cleanup started
+	const contextsToClose: Array<{ profileKey: string; createdAt: number }> = [];
+	for (const [profileKey, entry] of contextSnapshot.entries()) {
+		// Skip staged, launching, or newly-created contexts
+		if (usersToCleanup.has(entry.userId) && !entry.staged && !entry.launching && entry.createdAt < cleanupStartedMs) {
+			contextsToClose.push({ profileKey, createdAt: entry.createdAt });
+		}
+	}
+	
+	// Close the specific contexts from the snapshot
+	for (const { profileKey, createdAt } of contextsToClose) {
+		try {
+			await contextPool.closeContextIfMatches(profileKey, createdAt);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'idle cleanup failed to close context', { profileKey, error: message });
+		}
+	}
+	
+	// Clean up session data for users who had contexts closed
+	for (const userId of usersToCleanup) {
+		cleanupSessionsForUserId(userId, 'idle_cleanup', false);
+		closedUsers.push(userId);
+	}
+
+	return { closedUsers };
+}
+
