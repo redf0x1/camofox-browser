@@ -67,9 +67,17 @@ class BrowserClient {
   }
   
   // Tab management
-  async createTab(url = null) {
+  async createTab(url = null, options = {}) {
     const body = { userId: this.userId, sessionKey: this.sessionKey };
     if (url) body.url = url;
+    if (options.proxyProfile) body.proxyProfile = options.proxyProfile;
+    if (options.proxy) body.proxy = options.proxy;
+    if (options.geoMode) body.geoMode = options.geoMode;
+    if (options.preset) body.preset = options.preset;
+    if (options.locale) body.locale = options.locale;
+    if (options.timezoneId) body.timezoneId = options.timezoneId;
+    if (options.geolocation) body.geolocation = options.geolocation;
+    if (options.viewport) body.viewport = options.viewport;
     
     const result = await this.request('POST', '/tabs', body);
     if (result.tabId) {

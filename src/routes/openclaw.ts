@@ -103,18 +103,44 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 // POST /tabs/open - Open tab (alias for POST /tabs, OpenClaw format)
-router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; userId?: unknown; listItemId?: string }>, res: Response) => {
+router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; userId?: unknown; listItemId?: string; proxyProfile?: string; proxy?: unknown; geoMode?: string }>, res: Response) => {
 	try {
 		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
 
-		const { url, userId, listItemId = 'default' } = req.body;
+		const { url, userId, listItemId = 'default', proxyProfile, proxy, geoMode } = req.body;
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
 		}
 		if (!url) {
 			return res.status(400).json({ error: 'url is required' });
+		}
+
+		// Establish/check session profile if proxy/geo fields provided
+		if (proxyProfile || proxy || geoMode) {
+			const { resolveSessionProfileInput, getConfiguredServerProxy, loadProxyProfiles } = await import('../utils/proxy-profiles');
+			const { establishSessionProfile } = await import('../services/session');
+			const profileInput = {
+				proxy: proxy as any,
+				proxyProfile,
+				geoMode: geoMode as any,
+			};
+			const deps = {
+				serverProxy: getConfiguredServerProxy(CONFIG.proxy),
+				proxyProfiles: loadProxyProfiles(CONFIG.proxyProfilesFile),
+			};
+			try {
+				const resolvedProfileBase = resolveSessionProfileInput(profileInput, deps);
+				const resolvedProfile = { ...resolvedProfileBase, sessionKey: listItemId };
+				establishSessionProfile(userId, listItemId, resolvedProfile);
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				if (message === 'Session profile conflict') {
+					return res.status(409).json({ error: 'Session profile conflict' });
+				}
+				return res.status(400).json({ error: message });
+			}
 		}
 
 		const urlErr = await validateNavigationUrl(url, {

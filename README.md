@@ -635,6 +635,119 @@ curl -X POST http://localhost:9377/tabs \
 
 Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; keys become preset names).
 
+## Session-Level Proxy and Geo Overrides
+
+CamoFox supports session-level proxy and geolocation configuration with a hybrid model that combines server defaults with per-session overrides.
+
+### Proxy Configuration Model
+
+**Server-level baseline** (via environment variables):
+- `PROXY_HOST`, `PROXY_PORT`, `PROXY_USERNAME`, `PROXY_PASSWORD` — applied as the default for all sessions
+- Enables Camoufox geoip mode when configured
+
+**Session-level overrides** (via `POST /tabs` or CLI):
+- `proxyProfile` — select a named proxy profile from `CAMOFOX_PROXY_PROFILES_FILE`
+- `proxy` — provide raw proxy fields (`host`, `port`, `username`, `password`) directly
+- Session-level proxy overrides the server baseline for that specific `userId + sessionKey` combination
+
+**Session identity rules**:
+- The same `userId` may run different `sessionKey` profiles in parallel with different proxy/geo configurations
+- The same `userId + sessionKey` combination maintains a stable proxy/geo identity — requests with conflicting proxy/geo fields are rejected
+- Session reuse and cleanup scope proxy/geo identity by `userId + sessionKey`, not just `userId`
+
+### Geo Mode Behavior
+
+CamoFox offers two geo modes that control how explicit geo fields (locale, timezone, geolocation) interact with proxy-derived geo:
+
+**`geoMode=explicit-wins`** (default):
+- Explicit geo fields (locale, timezone, geolocation) remain authoritative
+- Proxy-derived geo suggestions are ignored
+- Use this mode when you want precise geo control regardless of proxy location
+
+**`geoMode=proxy-locked`**:
+- Explicit geo fields that conflict with proxy-derived geo are rejected
+- Proxy-derived geo is authoritative
+- Use this mode to ensure geo consistency with proxy exit location
+
+### CLI Examples
+
+Session-level proxy with named profile:
+```bash
+camofox open https://example.com --proxy-profile tokyo-exit --user agent1
+```
+
+Session-level proxy with raw fields:
+```bash
+camofox open https://example.com \
+  --proxy-host proxy.example.com \
+  --proxy-port 8080 \
+  --proxy-username user \
+  --proxy-password pass \
+  --user agent1
+```
+
+Combine proxy with geo mode:
+```bash
+camofox open https://example.com \
+  --proxy-profile london-exit \
+  --geo uk \
+  --geo-mode proxy-locked \
+  --user agent1
+```
+
+### API Examples
+
+Using a named proxy profile with explicit geo:
+```bash
+curl -X POST http://localhost:9377/tabs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "userId": "agent1",
+    "sessionKey": "task1",
+    "url": "https://example.com",
+    "proxyProfile": "tokyo-exit",
+    "preset": "japan",
+    "geoMode": "explicit-wins"
+  }'
+```
+
+Using raw proxy fields with proxy-locked geo:
+```bash
+curl -X POST http://localhost:9377/tabs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "userId": "agent1",
+    "sessionKey": "task2",
+    "url": "https://example.com",
+    "proxy": {
+      "host": "proxy.example.com",
+      "port": 8080,
+      "username": "user",
+      "password": "pass"
+    },
+    "geoMode": "proxy-locked"
+  }'
+```
+
+### Named Proxy Profiles
+
+Define proxy profiles in a JSON file and point `CAMOFOX_PROXY_PROFILES_FILE` to it:
+
+```json
+{
+  "tokyo-exit": {
+    "server": "http://tokyo.proxy.example.com:8080",
+    "username": "user",
+    "password": "pass"
+  },
+  "london-exit": {
+    "server": "http://london.proxy.example.com:8080"
+  }
+}
+```
+
+Then use profiles by name in API requests or CLI commands.
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -666,13 +779,14 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_CLI_USER` | `cli-default` | Default CLI user id |
 | `CAMOFOX_IDLE_TIMEOUT_MS` | `1800000` | CLI server idle timeout |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |
+| `CAMOFOX_PROXY_PROFILES_FILE` | (unset) | Optional JSON file defining named proxy profiles for session-level overrides |
 | `CAMOFOX_SESSION_TIMEOUT` | `1800000` | Session idle timeout in ms (min `60000`) |
 | `CAMOFOX_MAX_SESSIONS` | `50` | Maximum concurrent sessions |
 | `CAMOFOX_MAX_TABS` | `10` | Maximum tabs per session |
-| `PROXY_HOST` | (empty) | Proxy host (enables proxy routing) |
-| `PROXY_PORT` | (empty) | Proxy port |
-| `PROXY_USERNAME` | (empty) | Proxy username |
-| `PROXY_PASSWORD` | (empty) | Proxy password |
+| `PROXY_HOST` | (empty) | Proxy host (server-level default; enables proxy routing) |
+| `PROXY_PORT` | (empty) | Proxy port (server-level default) |
+| `PROXY_USERNAME` | (empty) | Proxy username (server-level default) |
+| `PROXY_PASSWORD` | (empty) | Proxy password (server-level default) |
 | `CAMOFOX_MAX_SNAPSHOT_CHARS` | `80000` | Max characters in snapshot before truncation |
 | `CAMOFOX_SNAPSHOT_TAIL_CHARS` | `5000` | Characters preserved at end of truncated snapshot |
 | `CAMOFOX_BUILDREFS_TIMEOUT_MS` | `12000` | Timeout for building element refs |

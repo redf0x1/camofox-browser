@@ -42,6 +42,7 @@ export interface ServerEnv {
   CAMOFOX_MAX_SNAPSHOT_NODES?: string;
   CAMOFOX_MAX_TABS?: string;
   CAMOFOX_PRESETS_FILE?: string;
+  CAMOFOX_PROXY_PROFILES_FILE?: string;
   CAMOFOX_SESSION_TIMEOUT?: string;
   CAMOFOX_SNAPSHOT_TAIL_CHARS?: string;
   CAMOFOX_BUILDREFS_TIMEOUT_MS?: string;
@@ -95,6 +96,7 @@ export interface AppConfig {
   vncBasePort: number;
   vncHost: string;
   presetsFile: string | undefined;
+  proxyProfilesFile: string | undefined;
   idleTimeoutMs: number;
   buildRefsTimeoutMs: number;
   tabLockTimeoutMs: number;
@@ -133,6 +135,7 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_MAX_SNAPSHOT_NODES?: string;
   CAMOFOX_MAX_TABS?: string;
   CAMOFOX_PRESETS_FILE?: string;
+  CAMOFOX_PROXY_PROFILES_FILE?: string;
   CAMOFOX_SNAPSHOT_TAIL_CHARS?: string;
   CAMOFOX_SESSION_TIMEOUT?: string;
   HANDLER_TIMEOUT_MS?: string;
@@ -283,6 +286,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const vncBasePort = Math.max(1, parsePositiveIntOrDefault(env.CAMOFOX_VNC_BASE_PORT, 6080));
   const vncHost = env.CAMOFOX_VNC_HOST || 'localhost';
   const presetsFile = env.CAMOFOX_PRESETS_FILE || undefined;
+  const proxyProfilesFile = env.CAMOFOX_PROXY_PROFILES_FILE || undefined;
   const idleTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_IDLE_TIMEOUT_MS, 1800000);
 
   return {
@@ -315,6 +319,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     vncBasePort,
     vncHost,
     presetsFile,
+    proxyProfilesFile,
     idleTimeoutMs,
     buildRefsTimeoutMs,
     tabLockTimeoutMs,
@@ -359,6 +364,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_MAX_SNAPSHOT_NODES: env.CAMOFOX_MAX_SNAPSHOT_NODES,
       CAMOFOX_MAX_TABS: env.CAMOFOX_MAX_TABS,
       CAMOFOX_PRESETS_FILE: env.CAMOFOX_PRESETS_FILE,
+      CAMOFOX_PROXY_PROFILES_FILE: env.CAMOFOX_PROXY_PROFILES_FILE,
       CAMOFOX_SESSION_TIMEOUT: env.CAMOFOX_SESSION_TIMEOUT,
       CAMOFOX_SNAPSHOT_TAIL_CHARS: env.CAMOFOX_SNAPSHOT_TAIL_CHARS,
       CAMOFOX_BUILDREFS_TIMEOUT_MS: env.CAMOFOX_BUILDREFS_TIMEOUT_MS,

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { BrowserContextOptions } from 'playwright-core';
 
-import type { ContextOverrides, SessionData, TabState } from '../types';
+import type { ContextOverrides, ResolvedSessionProfile, SessionData, TabState } from '../types';
 import { log } from '../middleware/logging';
 import { clearTabLock, clearAllTabLocks } from './tab';
 import { loadConfig } from '../utils/config';
@@ -33,9 +33,20 @@ export interface CanonicalProfile {
 	establishedAt: number;
 }
 
+export interface EstablishedSessionProfile {
+	userId: string;
+	sessionKey: string;
+	signature: string;
+	resolvedProfile: ResolvedSessionProfile;
+	establishedAt: number;
+}
+
 // Canonical per-user profile: stores resolved overrides from the first core POST /tabs.
 // Survives passive context eviction; cleared only on explicit session close/cleanup.
 const canonicalProfiles = new Map<string, CanonicalProfile>();
+
+// Session profiles keyed by userId::sessionKey to track separate proxy/geo profiles per session
+const sessionProfiles = new Map<string, EstablishedSessionProfile>();
 
 // Per-user mutex covering the entire first-create lifecycle (establishment -> tab commit).
 // Prevents sibling requests from observing provisional canonical state.
@@ -135,6 +146,16 @@ function cleanupSessionsForUserId(userId: string, reason: string, clearCanonical
 			mutex.resolve(false);
 			firstCreateMutexes.delete(key);
 		}
+		// Also clear all session profiles for this user
+		const profileKeysToDelete: string[] = [];
+		for (const [profileKey, profile] of sessionProfiles.entries()) {
+			if (profile.userId === key) {
+				profileKeysToDelete.push(profileKey);
+			}
+		}
+		for (const profileKey of profileKeysToDelete) {
+			sessionProfiles.delete(profileKey);
+		}
 	}
 
 	userConcurrency.delete(key);
@@ -153,10 +174,28 @@ export function normalizeUserId(userId: unknown): string {
 	return String(userId);
 }
 
-export function getSessionMapKey(userId: unknown, contextOverrides: ContextOverrides | null | undefined): string {
-	// Persistent profiles are keyed only by userId; overrides are applied on first launch.
-	void contextOverrides;
+function sessionOverlayKey(userId: unknown, sessionKey: string): string {
+	return `${normalizeUserId(userId)}::${sessionKey}`;
+}
+
+// Backward compatible version - takes contextOverrides instead of session profile  
+export function getSessionMapKey(userId: unknown, contextOverridesOrSessionKey: ContextOverrides | null | undefined | string, profileSignature?: string): string {
+	// New signature: (userId, sessionKey, profileSignature)
+	if (typeof contextOverridesOrSessionKey === 'string') {
+		const sessionKey = contextOverridesOrSessionKey;
+		if (profileSignature) {
+			return `${normalizeUserId(userId)}::${sessionKey}::${profileSignature}`;
+		}
+		return `${normalizeUserId(userId)}::${sessionKey}`;
+	}
+	// Old signature: (userId, contextOverrides) - backward compatibility
+	// This maintains the user-scoped behavior for existing routes
+	void contextOverridesOrSessionKey;
 	return normalizeUserId(userId);
+}
+
+export function getEstablishedSessionProfile(userId: unknown, sessionKey: string): EstablishedSessionProfile | undefined {
+	return sessionProfiles.get(sessionOverlayKey(userId, sessionKey));
 }
 
 export function getCanonicalProfile(userId: unknown): CanonicalProfile | undefined {
@@ -248,6 +287,49 @@ export function clearCanonicalProfile(userId: unknown): void {
 		mutex.resolve(false);
 		firstCreateMutexes.delete(key);
 	}
+}
+
+/**
+ * Store or validate a session profile for a specific userId + sessionKey combination.
+ * Returns the established profile if successful.
+ * Throws if a conflicting profile is already established for the same userId + sessionKey.
+ */
+export function establishSessionProfile(
+	userId: unknown,
+	sessionKey: string,
+	profile: ResolvedSessionProfile,
+): EstablishedSessionProfile {
+	const key = sessionOverlayKey(userId, sessionKey);
+	const existing = sessionProfiles.get(key);
+
+	if (existing) {
+		if (existing.signature !== profile.signature) {
+			throw new Error('Session profile conflict');
+		}
+		return existing;
+	}
+
+	const established: EstablishedSessionProfile = {
+		userId: normalizeUserId(userId),
+		sessionKey,
+		signature: profile.signature,
+		resolvedProfile: profile,
+		establishedAt: Date.now(),
+	};
+
+	sessionProfiles.set(key, established);
+	log('info', 'session profile established', {
+		userId: established.userId,
+		sessionKey,
+		signature: profile.signature,
+	});
+
+	return established;
+}
+
+export function clearSessionProfile(userId: unknown, sessionKey: string): void {
+	const key = sessionOverlayKey(userId, sessionKey);
+	sessionProfiles.delete(key);
 }
 
 export function getSessionsForUser(userId: unknown): Array<[string, SessionData]> {
@@ -382,7 +464,8 @@ export async function createStagedSession(
 
 	const generation = crypto.randomUUID();
 	const contextOptions = buildBrowserContextOptions(contextOverrides);
-	const entry = await contextPool.ensureContext(key, contextOptions, true, generation);
+	// For backward compatibility, use userId as profileKey when no session profile is provided
+	const entry = await contextPool.ensureContext(key, key, contextOptions, null, true, generation);
 
 	const session: SessionData = {
 		context: entry.context,
@@ -441,7 +524,7 @@ export async function rollbackStagedFirstUse(userId: unknown, generation: string
 }
 
 export async function getSession(userId: unknown, contextOverrides?: ContextOverrides | null): Promise<SessionData> {
-	const key = getSessionMapKey(userId, contextOverrides);
+	const key = normalizeUserId(userId);
 	let session = sessions.get(key);
 	const contextOptions = buildBrowserContextOptions(contextOverrides);
 
@@ -458,7 +541,7 @@ export async function getSession(userId: unknown, contextOverrides?: ContextOver
 		}
 
 		const launchPromise = (async (): Promise<SessionData> => {
-			const entry = await contextPool.ensureContext(normalizeUserId(userId), contextOptions);
+			const entry = await contextPool.ensureContext(key, key, contextOptions);
 			const created: SessionData = { context: entry.context, tabGroups: new Map(), lastAccess: Date.now() };
 			sessions.set(key, created);
 			log('info', 'session created', { userId: key });
@@ -473,7 +556,7 @@ export async function getSession(userId: unknown, contextOverrides?: ContextOver
 		}
 	} else {
 		// Re-resolve context on each access; ContextPool de-dupes launches and detects unexpected closes.
-		const entry = await contextPool.ensureContext(normalizeUserId(userId), contextOptions);
+		const entry = await contextPool.ensureContext(key, key, contextOptions);
 		session.context = entry.context;
 		session.lastAccess = Date.now();
 	}
@@ -496,6 +579,7 @@ export function clearAllState(): void {
 	sessions.clear();
 	tabSessionIndex.clear();
 	canonicalProfiles.clear();
+	sessionProfiles.clear();
 	for (const [, mutex] of firstCreateMutexes) mutex.resolve(false);
 	firstCreateMutexes.clear();
 	clearAllTabLocks();
@@ -504,8 +588,8 @@ export function clearAllState(): void {
 
 export async function closeSessionsForUser(userId: string): Promise<void> {
 	const key = normalizeUserId(userId);
-	await contextPool.closeStagedContext(key).catch(() => {});
-	await contextPool.closeContext(key).catch(() => {});
+	await contextPool.closeStagedContextByUserId(key).catch(() => {});
+	await contextPool.closeContextByUserId(key).catch(() => {});
 	cleanupSessionsForUserId(key, 'explicit_close');
 }
 
@@ -524,6 +608,7 @@ export async function closeAllSessions(): Promise<void> {
 	}
 	launchingSessions.clear();
 	canonicalProfiles.clear();
+	sessionProfiles.clear();
 	for (const [, mutex] of firstCreateMutexes) mutex.resolve(false);
 	firstCreateMutexes.clear();
 }
@@ -537,7 +622,7 @@ export function startCleanupInterval(): NodeJS.Timeout {
 		for (const [sessionKey, session] of sessions) {
 			if (now - session.lastAccess > SESSION_TIMEOUT_MS) {
 				// Persistent profile is preserved on disk; closing the context frees resources.
-				contextPool.closeContext(sessionKey).catch(() => {});
+				contextPool.closeContextByUserId(sessionKey).catch(() => {});
 				unindexSessionTabs(session);
 				sessions.delete(sessionKey);
 				cleanupTracing(sessionKey);

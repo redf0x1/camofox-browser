@@ -15,6 +15,7 @@ import { firefox, type BrowserContext, type BrowserContextOptions } from 'playwr
 import { loadConfig } from '../utils/config';
 import { readVersionedSidecar, writeVersionedSidecar } from '../utils/sidecar-version';
 import { log } from '../middleware/logging';
+import type { ResolvedProxyConfig } from '../types';
 
 const CONFIG = loadConfig();
 
@@ -25,12 +26,14 @@ type PersistentContextOptions = NonNullable<Parameters<typeof firefox.launchPers
 export interface PoolEntry {
 	context: BrowserContext;
 	userId: string;
+	profileKey: string;
 	profileDir: string;
 	lastAccess: number;
 	launching?: Promise<BrowserContext>;
 	staged?: boolean;
 	stagedGeneration?: string;
 	virtualDisplay?: any;
+	proxyConfig?: ResolvedProxyConfig | null;
 	seedOptions?: Pick<BrowserContextOptions, 'locale' | 'timezoneId' | 'geolocation' | 'viewport'>;
 }
 
@@ -41,13 +44,21 @@ function getHostOS(): 'macos' | 'windows' | 'linux' {
 	return 'linux';
 }
 
-function buildProxyConfig(): { server: string; username?: string; password?: string } | null {
-	const { host, port, username, password } = CONFIG.proxy;
-	if (!host || !port) return null;
+function buildProxyConfig(proxy?: ResolvedProxyConfig | null): { server: string; username?: string; password?: string } | null {
+	if (!proxy) {
+		// Fallback to configured server proxy
+		const { host, port, username, password } = CONFIG.proxy;
+		if (!host || !port) return null;
+		return {
+			server: `http://${host}:${port}`,
+			username: username || undefined,
+			password: password || undefined,
+		};
+	}
 	return {
-		server: `http://${host}:${port}`,
-		username: username || undefined,
-		password: password || undefined,
+		server: proxy.server,
+		username: proxy.username,
+		password: proxy.password,
 	};
 }
 
@@ -166,25 +177,28 @@ export class ContextPool {
 		}
 	}
 
-	getEntry(userId: string): PoolEntry | undefined {
-		return this.pool.get(userId);
+	getEntry(profileKey: string): PoolEntry | undefined {
+		return this.pool.get(profileKey);
 	}
 
 	getDisplayForUser(userId: string): string | null {
-		const entry = this.pool.get(String(userId));
-		if (!entry) return null;
+		// Find any entry for this userId (there may be multiple with different profile keys)
+		for (const entry of this.pool.values()) {
+			if (entry.userId !== String(userId)) continue;
 
-		if (entry.virtualDisplay) {
-			try {
-				const display = entry.virtualDisplay.get();
-				return typeof display === 'string' ? display : null;
-			} catch {
-				return null;
+			if (entry.virtualDisplay) {
+				try {
+					const display = entry.virtualDisplay.get();
+					return typeof display === 'string' ? display : null;
+				} catch {
+					return null;
+				}
 			}
-		}
 
-		const processDisplay = process.env.DISPLAY;
-		return typeof processDisplay === 'string' && processDisplay ? processDisplay : null;
+			const processDisplay = process.env.DISPLAY;
+			return typeof processDisplay === 'string' && processDisplay ? processDisplay : null;
+		}
+		return null;
 	}
 
 	size(): number {
@@ -192,9 +206,13 @@ export class ContextPool {
 	}
 
 	listActiveUserIds(): string[] {
-		return Array.from(this.pool.entries())
-			.filter(([, entry]) => !entry.staged)
-			.map(([userId]) => userId);
+		const userIds = new Set<string>();
+		for (const entry of this.pool.values()) {
+			if (!entry.staged) {
+				userIds.add(entry.userId);
+			}
+		}
+		return Array.from(userIds);
 	}
 
 	private cleanupVirtualDisplay(entry: PoolEntry): void {
@@ -208,9 +226,13 @@ export class ContextPool {
 		}
 	}
 
-	private async launchPersistentContext(userId: string, contextOptions?: BrowserContextOptions): Promise<{ context: BrowserContext; virtualDisplay?: any }> {
+	private async launchPersistentContext(
+		userId: string,
+		contextOptions?: BrowserContextOptions,
+		resolvedProxy?: ResolvedProxyConfig | null,
+	): Promise<{ context: BrowserContext; virtualDisplay?: any }> {
 		const hostOS = getHostOS();
-		const proxy = buildProxyConfig();
+		const proxy = buildProxyConfig(resolvedProxy);
 		const headless = this.headlessOverrides.get(userId) ?? CONFIG.headless;
 
 		const profileDir = profileDirForUserId(userId);
@@ -370,12 +392,19 @@ export class ContextPool {
 			this.headlessOverrides.set(normalized, headless);
 		}
 
-		const existing = this.pool.get(normalized);
-		if (existing) {
-			await this.closeContext(normalized);
+		// Close all contexts for this userId (there may be multiple with different profiles)
+		const entriesToClose: string[] = [];
+		for (const [profileKey, entry] of this.pool.entries()) {
+			if (entry.userId === normalized) {
+				entriesToClose.push(profileKey);
+			}
+		}
+		for (const profileKey of entriesToClose) {
+			await this.closeContext(profileKey);
 		}
 
-		return this.ensureContext(normalized);
+		// Return a new entry with default key (for backward compatibility)
+		return this.ensureContext(normalized, normalized);
 	}
 
 	private async evictIfNeeded(): Promise<void> {
@@ -390,17 +419,19 @@ export class ContextPool {
 
 		log('info', 'evicting persistent context (LRU)', { userId: lru.userId, profileDir: lru.profileDir });
 		this.notifyEviction(lru.userId);
-		await this.closeContext(lru.userId);
+		await this.closeContext(lru.profileKey);
 	}
 
 	async ensureContext(
+		profileKey: string,
 		userId: string,
 		options?: BrowserContextOptions,
+		resolvedProxy?: ResolvedProxyConfig | null,
 		staged = false,
 		stagedGeneration?: string,
 	): Promise<PoolEntry> {
 		const normalized = String(userId);
-		let entry = this.pool.get(normalized);
+		let entry = this.pool.get(profileKey);
 		const seed = pickSeedOptions(options);
 
 		if (entry) {
@@ -421,7 +452,7 @@ export class ContextPool {
 				// A cheap call that throws if the context is closed.
 				void entry.context.pages();
 			} catch {
-				this.pool.delete(normalized);
+				this.pool.delete(profileKey);
 				entry = undefined;
 			}
 		}
@@ -430,6 +461,7 @@ export class ContextPool {
 			if (seedDiffers(entry.seedOptions, seed)) {
 				log('warn', 'persistent context already exists; ignoring new context overrides', {
 					userId: normalized,
+					profileKey,
 					profileDir: entry.profileDir,
 				});
 			}
@@ -441,14 +473,16 @@ export class ContextPool {
 		const newEntry: PoolEntry = {
 			context: null as unknown as BrowserContext,
 			userId: normalized,
+			profileKey,
 			profileDir,
 			lastAccess: Date.now(),
 			staged,
 			stagedGeneration,
+			proxyConfig: resolvedProxy || null,
 			seedOptions: seed,
 		};
 
-		newEntry.launching = this.launchPersistentContext(normalized, options)
+		newEntry.launching = this.launchPersistentContext(normalized, options, resolvedProxy)
 			.then(({ context, virtualDisplay }) => {
 				newEntry.context = context;
 				newEntry.virtualDisplay = virtualDisplay;
@@ -456,27 +490,27 @@ export class ContextPool {
 				newEntry.lastAccess = Date.now();
 				context.on('close', () => {
 					this.cleanupVirtualDisplay(newEntry);
-					log('info', 'persistent context closed', { userId: normalized, profileDir });
-					this.pool.delete(normalized);
+					log('info', 'persistent context closed', { userId: normalized, profileKey, profileDir });
+					this.pool.delete(profileKey);
 				});
 				return context;
 			})
 			.catch((err) => {
 				this.cleanupVirtualDisplay(newEntry);
-				this.pool.delete(normalized);
+				this.pool.delete(profileKey);
 				const message = err instanceof Error ? err.message : String(err);
-				log('error', 'persistent context launch failed', { userId: normalized, profileDir, error: message });
+				log('error', 'persistent context launch failed', { userId: normalized, profileKey, profileDir, error: message });
 				throw err;
 			});
 
-		this.pool.set(normalized, newEntry);
+		this.pool.set(profileKey, newEntry);
 		await newEntry.launching;
 		await this.evictIfNeeded();
 		return newEntry;
 	}
 
-	async closeContext(userId: string): Promise<void> {
-		const normalized = String(userId);
+	async closeContext(profileKey: string): Promise<void> {
+		const normalized = String(profileKey);
 		const entry = this.pool.get(normalized);
 		if (!entry || entry.staged) return;
 
@@ -489,12 +523,12 @@ export class ContextPool {
 		} finally {
 			this.cleanupVirtualDisplay(entry);
 			this.pool.delete(normalized);
-			log('info', 'persistent context removed from pool', { userId: normalized, profileDir: entry.profileDir });
+			log('info', 'persistent context removed from pool', { userId: entry.userId, profileKey: normalized, profileDir: entry.profileDir });
 		}
 	}
 
-	async closeStagedContext(userId: string, generation?: string): Promise<void> {
-		const normalized = String(userId);
+	async closeStagedContext(profileKey: string, generation?: string): Promise<void> {
+		const normalized = String(profileKey);
 		const entry = this.pool.get(normalized);
 		if (!entry?.staged) return;
 		if (generation && entry.stagedGeneration !== generation) return;
@@ -503,15 +537,45 @@ export class ContextPool {
 		await this.closeContext(normalized);
 	}
 
+	async closeContextByUserId(userId: string): Promise<void> {
+		const normalized = String(userId);
+		// Close all contexts for this userId
+		const entriesToClose: string[] = [];
+		for (const [profileKey, entry] of this.pool.entries()) {
+			if (entry.userId === normalized && !entry.staged) {
+				entriesToClose.push(profileKey);
+			}
+		}
+		for (const profileKey of entriesToClose) {
+			await this.closeContext(profileKey);
+		}
+	}
+
+	async closeStagedContextByUserId(userId: string, generation?: string): Promise<void> {
+		const normalized = String(userId);
+		// Close all staged contexts for this userId
+		const entriesToClose: string[] = [];
+		for (const [profileKey, entry] of this.pool.entries()) {
+			if (entry.userId === normalized && entry.staged) {
+				if (!generation || entry.stagedGeneration === generation) {
+					entriesToClose.push(profileKey);
+				}
+			}
+		}
+		for (const profileKey of entriesToClose) {
+			await this.closeStagedContext(profileKey, generation);
+		}
+	}
+
 	async closeAll(): Promise<void> {
-		const userIds = Array.from(this.pool.keys());
-		for (const userId of userIds) {
-			const entry = this.pool.get(userId);
+		const profileKeys = Array.from(this.pool.keys());
+		for (const profileKey of profileKeys) {
+			const entry = this.pool.get(profileKey);
 			if (entry?.staged) {
 				entry.staged = false;
 				entry.stagedGeneration = undefined;
 			}
-			await this.closeContext(userId);
+			await this.closeContext(profileKey);
 		}
 	}
 }

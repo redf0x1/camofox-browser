@@ -647,4 +647,45 @@ describe('Session invariants', () => {
     expect(dl).toBeDefined();
     expect(dl.suggestedFilename).toBe('test-download.bin');
   }, 30000);
+
+  test('same user can establish different session profiles on different sessionKeys', async () => {
+    const userId = trackUser('parallel-profiles');
+
+    const first = await postJson(serverUrl, '/tabs', {
+      userId,
+      sessionKey: 'alpha',
+      url: `${testSiteUrl}/pageA`,
+      proxy: { host: 'proxy.alpha.test', port: '8001' },
+    });
+    expect(first.res.status).toBe(200);
+
+    const second = await postJson(serverUrl, '/tabs', {
+      userId,
+      sessionKey: 'beta',
+      url: `${testSiteUrl}/pageB`,
+      proxy: { host: 'proxy.beta.test', port: '8002' },
+    });
+    expect(second.res.status).toBe(200);
+  });
+
+  test('same userId + sessionKey rejects profile drift', async () => {
+    const userId = trackUser('profile-drift');
+
+    await postJson(serverUrl, '/tabs', {
+      userId,
+      sessionKey: 'stable',
+      url: `${testSiteUrl}/pageA`,
+      proxy: { host: 'proxy.alpha.test', port: '8001' },
+    });
+
+    const conflict = await postJson(serverUrl, '/tabs', {
+      userId,
+      sessionKey: 'stable',
+      url: `${testSiteUrl}/pageB`,
+      proxy: { host: 'proxy.beta.test', port: '8002' },
+    });
+
+    expect(conflict.res.status).toBe(409);
+    expect(conflict.data.error).toBe('Session profile conflict');
+  });
 });

@@ -333,11 +333,47 @@ router.post(
 			}
 
 			const { userId, sessionKey, listItemId, url, preset, locale, timezoneId, geolocation, viewport } = req.body;
+			const { proxy, proxyProfile, geoMode } = req.body as {
+				proxy?: unknown;
+				proxyProfile?: string;
+				geoMode?: 'explicit-wins' | 'proxy-locked';
+			};
 			const resolvedSessionKey = sessionKey || listItemId;
 			if (!userId || !resolvedSessionKey) {
 				return res.status(400).json({ error: 'userId and sessionKey required' });
 			}
 			createUserId = String(userId);
+
+			// Check for session profile conflict (proxy/geo drift)
+			if (proxy || proxyProfile || geoMode) {
+				const { resolveSessionProfileInput, getConfiguredServerProxy, loadProxyProfiles } = await import('../utils/proxy-profiles');
+				const { establishSessionProfile } = await import('../services/session');
+				const profileInput = {
+					preset,
+					locale,
+					timezoneId,
+					geolocation: geolocation as any,
+					viewport: viewport as any,
+					proxy: proxy as any,
+					proxyProfile,
+					geoMode,
+				};
+				const deps = {
+					serverProxy: getConfiguredServerProxy(CONFIG.proxy),
+					proxyProfiles: loadProxyProfiles(CONFIG.proxyProfilesFile),
+				};
+				try {
+					const resolvedProfileBase = resolveSessionProfileInput(profileInput, deps);
+					const resolvedProfile = { ...resolvedProfileBase, sessionKey: resolvedSessionKey };
+					establishSessionProfile(userId, resolvedSessionKey, resolvedProfile);
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					if (message === 'Session profile conflict') {
+						return res.status(409).json({ error: 'Session profile conflict' });
+					}
+					return res.status(400).json({ error: message });
+				}
+			}
 
 			let contextOverrides: ContextOverrides | null = null;
 			try {
