@@ -3,6 +3,22 @@
  * Verifies that ensureContext reuses contexts only when profileKey matches.
  */
 
+// Mock config FIRST to set small maxSessions for eviction testing
+jest.mock('../../dist/src/utils/config', () => ({
+  loadConfig: jest.fn(() => ({
+    maxSessions: 2, // Force small pool for eviction tests
+    userDataDir: '/tmp/camofox-test',
+    profilesDir: '/tmp/camofox-test/profiles',
+    port: 3000,
+    proxy: {
+      host: '',
+      port: '',
+      username: '',
+      password: '',
+    },
+  })),
+}));
+
 // Mock camoufox-js to avoid ESM import issues in Jest
 jest.mock('camoufox-js', () => ({
   launchOptions: jest.fn(() => Promise.resolve({})),
@@ -153,5 +169,59 @@ describe('ContextPool proxy-geo identity', () => {
     
     // Cleanup
     await pool.closeContext('user-3::beta::sig-2');
+  });
+
+  test('evictIfNeeded evicts by profileKey not userId (regression for LRU bug)', async () => {
+    const pool = new ContextPool();
+    
+    // maxSessions is mocked to 2, so pool can hold max 2 contexts
+    // Create first context for user-4 with profileKey alpha
+    const alpha = await pool.ensureContext(
+      'user-4::alpha::sig-a',
+      'user-4',
+      { timezoneId: 'Asia/Tokyo' },
+    );
+    
+    // Create second context for same user-4 with different profileKey beta
+    // Pool is now at capacity (2/2)
+    const beta = await pool.ensureContext(
+      'user-4::beta::sig-b',
+      'user-4',
+      { timezoneId: 'Europe/Berlin' },
+    );
+    
+    // Both should exist, pool at max capacity
+    expect(pool.size()).toBe(2);
+    expect(pool.getEntry('user-4::alpha::sig-a')).toBeDefined();
+    expect(pool.getEntry('user-4::beta::sig-b')).toBeDefined();
+    
+    // Touch beta to make alpha the LRU
+    pool.getEntry('user-4::beta::sig-b');
+    
+    // Create third context for different user
+    // This should trigger eviction of LRU (user-4::alpha::sig-a)
+    // Before fix (184384d): evictIfNeeded called closeContext(lru.userId) = closeContext('user-4')
+    // which wouldn't match 'user-4::alpha::sig-a' or 'user-4::beta::sig-b', so eviction failed
+    // After fix: evictIfNeeded calls closeContext(lru.profileKey) = closeContext('user-4::alpha::sig-a')
+    // which correctly evicts the LRU entry
+    const gamma = await pool.ensureContext(
+      'user-5::gamma::sig-c',
+      'user-5',
+      { timezoneId: 'America/New_York' },
+    );
+    
+    // Verify eviction worked correctly:
+    // - Pool stayed at max size (2)
+    // - LRU profileKey (alpha) was evicted
+    // - Sibling profileKey (beta) for same userId survived
+    // - New context (gamma) was added
+    expect(pool.size()).toBe(2);
+    expect(pool.getEntry('user-4::alpha::sig-a')).toBeUndefined(); // LRU evicted
+    expect(pool.getEntry('user-4::beta::sig-b')).toBeDefined();    // Sibling survived
+    expect(pool.getEntry('user-5::gamma::sig-c')).toBeDefined();   // New entry added
+    
+    // Cleanup
+    await pool.closeContext('user-4::beta::sig-b');
+    await pool.closeContext('user-5::gamma::sig-c');
   });
 });
