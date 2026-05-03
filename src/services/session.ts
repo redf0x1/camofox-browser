@@ -352,6 +352,14 @@ export function countTotalTabsForSessions(sessionsForUser?: Array<[string, Sessi
 	return totalTabs;
 }
 
+export function getLifecycleSessionSnapshot(): { liveSessions: number; liveTabs: number; stagedCreates: number } {
+	return {
+		liveSessions: sessions.size,
+		liveTabs: countTotalTabsForSessions(),
+		stagedCreates: launchingSessions.size,
+	};
+}
+
 export function getTabGroup(session: SessionData, sessionKey: string): Map<string, TabState> {
 	let group = session.tabGroups.get(sessionKey);
 	if (!group) {

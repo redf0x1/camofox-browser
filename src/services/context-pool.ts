@@ -215,6 +215,20 @@ export class ContextPool {
 		return Array.from(userIds);
 	}
 
+	getLifecycleSnapshot(): { liveContexts: number; launchingContexts: number; stagedContexts: number } {
+		let launchingContexts = 0;
+		let stagedContexts = 0;
+		for (const entry of this.pool.values()) {
+			if (entry.launching) launchingContexts++;
+			if (entry.staged) stagedContexts++;
+		}
+		return {
+			liveContexts: this.pool.size,
+			launchingContexts,
+			stagedContexts,
+		};
+	}
+
 	private cleanupVirtualDisplay(entry: PoolEntry): void {
 		if (!entry.virtualDisplay) return;
 		try {

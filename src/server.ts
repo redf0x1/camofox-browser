@@ -6,9 +6,11 @@ import coreRoutes from './routes/core';
 import openclawRoutes from './routes/openclaw';
 import { installCrashHandlers, safeError } from './middleware/errors';
 import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
+import { createLifecycleActivityMiddleware } from './middleware/lifecycle-activity';
 import { assertServerExposureSafety, loadConfig } from './utils/config';
 import { closeBrowser } from './services/browser';
 import { contextPool } from './services/context-pool';
+import { lifecycleController } from './services/lifecycle-controller';
 import {
 	closeAllSessions,
 	countTotalTabsForSessions,
@@ -30,6 +32,7 @@ assertServerExposureSafety(CONFIG);
 const app = express();
 app.use(express.json({ limit: '100kb' }));
 app.use(loggingMiddleware);
+app.use(createLifecycleActivityMiddleware(lifecycleController));
 
 app.use(coreRoutes);
 app.use(openclawRoutes);

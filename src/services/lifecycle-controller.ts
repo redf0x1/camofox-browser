@@ -2,6 +2,10 @@
  * Lifecycle state machine for idle cleanup and graceful exit.
  */
 
+import { loadConfig } from '../utils/config';
+
+const CONFIG = loadConfig();
+
 export interface LifecycleLiveState {
   liveSessions: number;
   liveTabs: number;
@@ -9,9 +13,12 @@ export interface LifecycleLiveState {
   stagedCreates: number;
 }
 
+type CleanupState = 'idle' | 'in_progress' | 'finished';
+
 export class LifecycleController {
   private lastActivityMs: number;
   private cleanupFinishedMs: number | null = null;
+  private cleanupState: CleanupState = 'idle';
   private liveState: LifecycleLiveState = {
     liveSessions: 0,
     liveTabs: 0,
@@ -45,6 +52,9 @@ export class LifecycleController {
   recordInteractiveActivity(): void {
     this.lastActivityMs = this.now();
     this.cleanupFinishedMs = null;
+    if (this.cleanupState === 'in_progress') {
+      this.cleanupState = 'idle';
+    }
   }
 
   syncLiveState(state: LifecycleLiveState): void {
@@ -64,8 +74,18 @@ export class LifecycleController {
     );
   }
 
+  private hasLaunchingOrStagedWork(): boolean {
+    return (
+      this.liveState.launchingContexts > 0 ||
+      this.liveState.stagedCreates > 0
+    );
+  }
+
   shouldRunCleanup(now = this.now()): boolean {
     if (this.cleanupFinishedMs !== null) {
+      return false;
+    }
+    if (this.hasLaunchingOrStagedWork()) {
       return false;
     }
     const idleMs = now - this.lastActivityMs;
@@ -81,12 +101,28 @@ export class LifecycleController {
   }
 
   markCleanupStarted(_now = this.now()): void {
-    // Reserved for future use
+    this.cleanupState = 'in_progress';
   }
 
   markCleanupFinished(result: 'success' | 'aborted' | 'failed', now = this.now()): void {
     if (result === 'success') {
       this.cleanupFinishedMs = now;
+      this.cleanupState = 'finished';
+    } else {
+      this.cleanupState = 'idle';
     }
   }
+
+  snapshot(): { cleanupState: CleanupState; liveState: LifecycleLiveState } {
+    return {
+      cleanupState: this.cleanupState,
+      liveState: { ...this.liveState },
+    };
+  }
 }
+
+// Singleton instance for server-wide lifecycle management
+export const lifecycleController = new LifecycleController({
+  idleCleanupTimeoutMs: CONFIG.idleTimeoutMs,
+  idleExitTimeoutMs: CONFIG.idleExitTimeoutMs,
+});

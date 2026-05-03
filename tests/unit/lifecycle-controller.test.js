@@ -107,4 +107,29 @@ describe('LifecycleController', () => {
     });
     expect(config2.idleExitTimeoutMs).toBe(3000);
   });
+
+  test('launching or staged work blocks cleanup', () => {
+    const controller = new LifecycleController({
+      idleCleanupTimeoutMs: 1000,
+      idleExitTimeoutMs: 1000,
+      now: () => 8000,
+    });
+
+    controller.syncLiveState({ liveSessions: 1, liveTabs: 0, launchingContexts: 1, stagedCreates: 0 });
+    expect(controller.shouldRunCleanup(9500)).toBe(false);
+  });
+
+  test('cleanup in progress is aborted by new activity', () => {
+    const controller = new LifecycleController({
+      idleCleanupTimeoutMs: 1000,
+      idleExitTimeoutMs: 1000,
+      now: () => 12000,
+    });
+
+    controller.syncLiveState({ liveSessions: 1, liveTabs: 0, launchingContexts: 0, stagedCreates: 0 });
+    controller.markCleanupStarted(12000);
+    controller.recordInteractiveActivity();
+
+    expect(controller.snapshot().cleanupState).toBe('idle');
+  });
 });
