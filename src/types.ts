@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from 'playwright-core';
+import type { ResolvedContextOptions } from './utils/presets';
 
 export interface GeolocationConfig {
   latitude: number;
@@ -226,6 +227,48 @@ export interface YouTubeTranscriptResult {
   language?: string;
   total_words?: number;
   available_languages?: Array<{ code: string; name: string; kind: string }>;
+}
+
+export type GeoMode = 'explicit-wins' | 'proxy-locked';
+
+export interface RawProxyOverride {
+  host: string;
+  port: string;
+  username?: string;
+  password?: string;
+}
+
+export interface ProxyProfileConfig {
+  server: string;
+  username?: string;
+  password?: string;
+  locale?: string;
+  timezoneId?: string;
+  geolocation?: GeolocationConfig;
+}
+
+export interface SessionProfileInput extends ContextOverrides {
+  proxyProfile?: string;
+  proxy?: RawProxyOverride;
+  geoMode?: GeoMode;
+}
+
+export interface ResolvedProxyConfig {
+  source: 'server-default' | 'named-profile' | 'raw-override';
+  server: string;
+  username?: string;
+  password?: string;
+  profileName?: string;
+  locale?: string;
+  timezoneId?: string;
+  geolocation?: GeolocationConfig;
+}
+
+export interface ResolvedSessionProfile extends ResolvedContextOptions {
+  sessionKey: string;
+  geoMode: GeoMode;
+  proxy: ResolvedProxyConfig | null;
+  signature: string;
 }
 
 declare global {
