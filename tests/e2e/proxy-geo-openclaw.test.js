@@ -121,6 +121,30 @@ describe('OpenClaw proxy and geo contract', () => {
     expect(openclaw.data.error).toContain('Unknown proxy profile');
   }, 60000);
 
+  test('OpenClaw /tabs/open rejects conflicting proxy profile (session profile conflict)', async () => {
+    const userId = trackUser('openclaw-conflict');
+    
+    // Establish canonical with tokyo-exit
+    const establish = await postJson(serverUrl, '/tabs', {
+      userId,
+      sessionKey: 'default',
+      url: `${testSiteUrl}/pageA`,
+      proxyProfile: 'tokyo-exit',
+    });
+    expect(establish.res.status).toBe(200);
+    
+    // OpenClaw open with different proxy profile should reject with 409
+    const openclaw = await postJson(serverUrl, '/tabs/open', {
+      userId,
+      listItemId: 'default',
+      url: `${testSiteUrl}/pageB`,
+      proxyProfile: 'berlin-exit',
+    });
+    
+    expect(openclaw.res.status).toBe(409);
+    expect(openclaw.data.error).toBe('Session profile conflict');
+  }, 60000);
+
   test('OpenClaw /tabs/open works without proxy fields (uses canonical)', async () => {
     const userId = trackUser('openclaw-no-fields');
     

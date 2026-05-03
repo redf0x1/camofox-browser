@@ -117,9 +117,10 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 			return res.status(400).json({ error: 'url is required' });
 		}
 
-		// Validate proxy fields if provided
+		// Establish/check session profile if proxy/geo fields provided
 		if (proxyProfile || proxy || geoMode) {
 			const { resolveSessionProfileInput, getConfiguredServerProxy, loadProxyProfiles } = await import('../utils/proxy-profiles');
+			const { establishSessionProfile } = await import('../services/session');
 			const profileInput = {
 				proxy: proxy as any,
 				proxyProfile,
@@ -130,10 +131,14 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 				proxyProfiles: loadProxyProfiles(CONFIG.proxyProfilesFile),
 			};
 			try {
-				// Validate the fields are well-formed
-				resolveSessionProfileInput(profileInput, deps);
+				const resolvedProfileBase = resolveSessionProfileInput(profileInput, deps);
+				const resolvedProfile = { ...resolvedProfileBase, sessionKey: listItemId };
+				establishSessionProfile(userId, listItemId, resolvedProfile);
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
+				if (message === 'Session profile conflict') {
+					return res.status(409).json({ error: 'Session profile conflict' });
+				}
 				return res.status(400).json({ error: message });
 			}
 		}
