@@ -338,4 +338,4 @@ curl -sS -X POST "http://127.0.0.1:9377/tabs/open" \
 - **Server restart**: Session profiles are memory-only and cleared on server restart
 - **Proxy validation**: Raw proxy fields are validated for required `host` and `port`; missing fields return errors
 - **Geo mode default**: If `geoMode` is omitted, defaults to `explicit-wins`
-- **Reconfiguration**: Once a `userId + sessionKey` establishes a profile, conflicting proxy/geo overrides return `Session profile conflict` until cleanup, eviction, or server restart clears that session profile
+- **Reconfiguration**: Once a `userId + sessionKey` establishes a profile, conflicting proxy/geo overrides return `Session profile conflict` until explicit session cleanup or server restart clears that session profile; passive eviction alone does not clear it
