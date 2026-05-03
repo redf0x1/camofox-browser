@@ -1,12 +1,12 @@
 {
   "name": "camofox-browser",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "Anti-detection browser server for AI agents — REST API wrapping Camoufox engine with OpenClaw plugin support",
   "type": "commonjs",
   "main": "dist/src/server.js",
   "bin": {
-     "camofox-browser": "bin/camofox-browser.js",
-     "camofox": "bin/camofox.js"
+    "camofox-browser": "bin/camofox-browser.js",
+    "camofox": "bin/camofox.js"
   },
   "license": "MIT",
   "author": "redf0x1",

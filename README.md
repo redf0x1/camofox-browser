@@ -58,12 +58,14 @@
 - **TypeScript** — strict mode, typed request shapes, modular Express routes
 - **YouTube Transcript Extraction** — yt-dlp + browser fallback (service-level; no public API route currently exposed)
 - **Snapshot Pagination** — offset-based windowing for large page snapshots
+- **Image Listing Route** — image-only extraction over the shared resource extractor with selector, extension, lazy-load, and blob-resolution controls
 - **Browser Health Monitoring** — health probe with recovery/degraded state tracking
 - 🖥️ **CLI Mode** — 50+ commands for terminal-based browser automation
 - 🔐 **Auth Vault** — AES-256-GCM encrypted credential storage (LLM-safe)
 - 📜 **Pipeline Scripting** — Execute command scripts from files
 - 🔍 **Console Capture** — capture and filter browser console messages and uncaught errors
 - 📼 **Playwright Tracing** — record and export Playwright traces for debugging
+- 🗂️ **Trace Artifact Management** — list, download, and delete managed trace ZIPs per user session
 
 ## Preview Status
 
@@ -480,7 +482,7 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 | POST | `/tabs/:tabId/forward` | Go forward | Body: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | POST | `/tabs/:tabId/refresh` | Refresh | Body: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/tabs/:tabId/links?userId=...&limit=50&offset=0` | Extract links (paginated) | Query: `userId` | None |
-| GET | `/tabs/:tabId/images?userId=...` | List extracted images | Query: `userId` | None |
+| GET | `/tabs/:tabId/images?userId=...` | List extracted images | Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/tabs/:tabId/screenshot?userId=...&fullPage=true` | Screenshot (PNG bytes) | Query: `userId` | None |
 | GET | `/tabs/:tabId/stats?userId=...` | Tab stats + visited URLs | Query: `userId` | None |
 | DELETE | `/tabs/:tabId` | Close a tab (expects JSON body: `{ "userId": "..." }`) | Body: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
@@ -501,6 +503,9 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 | POST | `/tabs/:tabId/trace/chunk/start` | Start trace chunk | Body: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | POST | `/tabs/:tabId/trace/chunk/stop` | Stop chunk and save ZIP | Body: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/tabs/:tabId/trace/status` | Check trace status | Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
+| GET | `/sessions/:userId/traces` | List managed trace ZIPs for a user | Path: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
+| GET | `/sessions/:userId/traces/:filename` | Download a managed trace ZIP | Path: `userId`, `filename` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
+| DELETE | `/sessions/:userId/traces/:filename` | Delete a managed trace ZIP | Path: `userId`, `filename` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/tabs/:tabId/console` | Get console messages | Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/tabs/:tabId/errors` | Get uncaught JS errors | Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | POST | `/tabs/:tabId/console/clear` | Clear console + errors | Body or Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
@@ -633,7 +638,7 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `PORT` | (optional) | Alternative port env var (common in PaaS) |
 | `NODE_ENV` | `development` | Node environment |
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
-| `CAMOFOX_API_KEY` | (empty) | When set, conditionally guards protected endpoints (tab creation, navigation, interaction, session management, downloads, tracing, console) via `Authorization: Bearer` header. Unset = no auth enforced. |
+| `CAMOFOX_API_KEY` | (empty) | When set, conditionally guards protected endpoints (tab creation, navigation, interaction, session management, downloads, image extraction, tracing, console) via `Authorization: Bearer` header. Unset = no auth enforced. |
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
 | `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |

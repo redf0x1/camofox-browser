@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.3.0] - 2026-05-03
+
+### Upgrade Notes
+- **New Wave 1 surfaces** add trace artifact retrieval and image-only extraction on top of the existing tracing/resource services. These are additive endpoints and do not remove any previous route or alias.
+- **Conditional auth coverage** now includes the image listing route when `CAMOFOX_API_KEY` is set, aligning it with the surrounding extraction/tracing surfaces.
+
+### Added
+- **Trace artifact management** — `GET /sessions/:userId/traces`, `GET /sessions/:userId/traces/:filename`, and `DELETE /sessions/:userId/traces/:filename`
+- **Image listing route** — `GET /tabs/:tabId/images` for image-only extraction with selector, extension, blob-resolution, and lazy-load options
+- **Wave 1 regression coverage** for trace ownership/path handling, timeout cleanup, chunk-stop coordination, and image-route auth/behavior
+
+### Fixed
+- Trace artifact ownership now uses collision-safe owner tokens rather than lossy userId sanitization
+- Trace artifact handling now rejects spoofed paths, keeps managed files inside the traces root, and tolerates vanished files during list operations
+- Trace timeout cleanup now stays coordinated with both manual stop and in-flight chunk-stop operations
+- `extractImages()` no longer requires a fake `userId` shim in its shared extractor contract
+
+### Changed
+- README and release metadata now reflect shipped Wave 1 trace/image capabilities
+- Package and OpenClaw plugin versions now advance together to `2.3.0`
+
 ## [2.2.1] - 2026-04-09
 
 ### Changed

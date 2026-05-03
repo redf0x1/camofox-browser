@@ -14,15 +14,16 @@ CamoFox Browser Server is in **Preview** (Phase 1). See [Preview Status](README.
 
 | Version | Commit | npm | GitHub Release | Notes |
 |---------|--------|-----|----------------|-------|
+| v2.3.0 | — | — | — | Wave 1 release candidate. Adds trace artifact management and image-only extraction, with refreshed release metadata. |
 | v2.2.1 | — | — | — | Release-ready. Carries final release framing over v2.2.0 tag. |
 | v2.2.0 | `e2c397d` | — | — | Tagged 2026-04-09. Includes 11 feature commits since v2.1.1. |
 | v2.1.1 | `8b97952` | Published 2026-03-08 | Published | Patch: ref error handling |
 | v2.1.0 | `ea5af9d` | Published 2026-03-08 | Published | Patch: ref system improvements |
 | v2.0.5 | `e696846` | Published 2026-03-08 | Published | Patch: typing truncation fix |
 
-> **Upgrade guidance for v2.2.0+:** Local-state sidecar versioning is fail-closed — incompatible state causes the affected session to error with the specific path to delete. For sidecar metadata, only the indicated file is removed; for profile-level incompatibilities (e.g., engine version mismatch), the entire profile directory may need deletion. Follow the error message guidance. When `CAMOFOX_API_KEY` is set, core and OpenClaw protected endpoints require `Authorization: Bearer` auth; `POST /stop` requires `CAMOFOX_ADMIN_KEY` unconditionally.
+> **Upgrade guidance for v2.3.0+:** Local-state sidecar versioning is fail-closed — incompatible state causes the affected session to error with the specific path to delete. For sidecar metadata, only the indicated file is removed; for profile-level incompatibilities (e.g., engine version mismatch), the entire profile directory may need deletion. Follow the error message guidance. When `CAMOFOX_API_KEY` is set, core and OpenClaw protected endpoints require `Authorization: Bearer` auth; `POST /stop` requires `CAMOFOX_ADMIN_KEY` unconditionally.
 
-> **Note:** A 2.1.x maintenance lane would only be opened if a user-facing defect in published v2.1.1 requires hotfix maintenance. Current development continues on the 2.2.0+ line.
+> **Note:** A 2.1.x maintenance lane would only be opened if a user-facing defect in published v2.1.1 requires hotfix maintenance. Current development continues on the 2.3.0+ line.
 
 > Earlier versions (v2.0.4 and below) are documented in individual release entries below. Note: v2.0.3 was reserved on npm; its content was published as v2.0.4.
 
