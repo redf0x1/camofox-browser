@@ -278,7 +278,7 @@ export async function browserTranscript(
 	const normalizedUrl = normalizeYoutubeUrl(url);
 	const normalizedLang = normalizeLanguage(lang);
 
-	const entry = await contextPool.ensureContext(INTERNAL_TRANSCRIPT_USER_ID);
+	const entry = await contextPool.ensureContext(INTERNAL_TRANSCRIPT_USER_ID, INTERNAL_TRANSCRIPT_USER_ID);
 	const page = await entry.context.newPage();
 	let hardTimeoutTimer: NodeJS.Timeout | undefined;
 
