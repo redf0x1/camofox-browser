@@ -51,6 +51,7 @@ export class LifecycleController {
     this.liveState = state;
     if (this.hasLiveActivity()) {
       this.lastActivityMs = this.now();
+      this.cleanupFinishedMs = null;
     }
   }
 
@@ -83,7 +84,9 @@ export class LifecycleController {
     // Reserved for future use
   }
 
-  markCleanupFinished(_result: 'success' | 'aborted' | 'failed', now = this.now()): void {
-    this.cleanupFinishedMs = now;
+  markCleanupFinished(result: 'success' | 'aborted' | 'failed', now = this.now()): void {
+    if (result === 'success') {
+      this.cleanupFinishedMs = now;
+    }
   }
 }
