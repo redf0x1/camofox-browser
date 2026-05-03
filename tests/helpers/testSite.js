@@ -201,6 +201,27 @@ function createTestApp() {
       </body></html>
     `);
   });
+
+  app.get('/select-redirect', (_req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html><head><title>Select Redirect</title></head>
+      <body>
+        <h1>Select Redirect Test</h1>
+        <select id="target-select">
+          <option value="">Choose</option>
+          <option value="http://169.254.169.254/latest/meta-data">Metadata</option>
+        </select>
+        <script>
+          document.getElementById('target-select').addEventListener('change', (event) => {
+            if (event.target.value) {
+              window.location.href = event.target.value;
+            }
+          });
+        </script>
+      </body></html>
+    `);
+  });
   
   // Echo endpoint for macro expansion testing - echoes the full request URL
   app.get('/echo-url', (req, res) => {

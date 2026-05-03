@@ -135,6 +135,8 @@ docker run -d \
   --name camofox-browser \
   -p 9377:9377 \
   -p 6080:6080 \
+  -e CAMOFOX_HOST=0.0.0.0 \
+  -e CAMOFOX_API_KEY=change-me \
   -v ~/.camofox:/home/node/.camofox \
   camofox-browser
 ```
@@ -150,9 +152,10 @@ services:
     ports:
       - "9377:9377"
     environment:
+      CAMOFOX_HOST: "0.0.0.0"
       CAMOFOX_PORT: "9377"
-      # Optional auth gates
-      # CAMOFOX_API_KEY: "change-me"
+      # Required when CAMOFOX_HOST is non-loopback
+      CAMOFOX_API_KEY: "change-me"
       # CAMOFOX_ADMIN_KEY: "change-me"
       # Optional: proxy routing (also enables Camoufox geoip mode)
       # PROXY_HOST: ""
@@ -459,6 +462,8 @@ AI Agent (MCP / OpenClaw / REST Client)
 
 Base URL: `http://localhost:9377`
 
+> **Security defaults:** `CAMOFOX_HOST` now defaults to `127.0.0.1`. If you bind beyond loopback (for example `0.0.0.0` in Docker or PaaS), `CAMOFOX_API_KEY` becomes required at startup. On non-loopback binds, navigation targets on loopback/private/link-local/metadata hosts are blocked by default unless you explicitly set `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`. If you also configure `PROXY_HOST`/`PROXY_PORT`, exposed deployments must opt into `CAMOFOX_ALLOW_PRIVATE_NETWORK=true` until proxy-side private-target validation exists.
+
 ### Core Endpoints
 
 Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the server resolves `tabId` **within a `userId` scope**. If you omit `userId`, you will typically get `404 Tab not found`.
@@ -637,8 +642,10 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 | `CAMOFOX_PORT` | `9377` | Server port |
 | `PORT` | (optional) | Alternative port env var (common in PaaS) |
 | `NODE_ENV` | `development` | Node environment |
+| `CAMOFOX_HOST` | `127.0.0.1` | Server bind host. Set `0.0.0.0` for Docker/PaaS/network exposure. Non-loopback binds require `CAMOFOX_API_KEY`. |
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
-| `CAMOFOX_API_KEY` | (empty) | When set, conditionally guards protected endpoints (tab creation, navigation, interaction, session management, downloads, image extraction, tracing, console) via `Authorization: Bearer` header. Unset = no auth enforced. |
+| `CAMOFOX_API_KEY` | (empty) | Guards protected endpoints (tab creation, navigation, interaction, session management, downloads, image extraction, tracing, console) via `Authorization: Bearer` header when set. Required whenever `CAMOFOX_HOST` exposes the server beyond loopback. |
+| `CAMOFOX_ALLOW_PRIVATE_NETWORK` | `true` on loopback binds, `false` otherwise | Allows navigation to loopback/private/link-local/metadata targets. Leave unset for the safe default; enable only for trusted deployments that intentionally need internal-network reachability. |
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
 | `CAMOFOX_VNC_TIMEOUT_MS` | `120000` | Max VNC session duration in ms before auto-stop |
@@ -683,7 +690,9 @@ Custom presets: set `CAMOFOX_PRESETS_FILE=/path/to/presets.json` (JSON object; k
 docker build -t camofox-browser .
 docker run -p 9377:9377 -p 6080:6080 \
   -v ~/.camofox:/home/node/.camofox \
+  -e CAMOFOX_HOST=0.0.0.0 \
   -e CAMOFOX_PORT=9377 \
+  -e CAMOFOX_API_KEY=change-me \
   camofox-browser
 ```
 
@@ -699,6 +708,8 @@ fly deploy
 ### Railway
 
 - Create a new project → deploy from this GitHub repo
+- Set `CAMOFOX_HOST=0.0.0.0`
+- Set `CAMOFOX_API_KEY` to a strong secret
 - Set `CAMOFOX_PORT=9377` (Railway will also provide `PORT`, which is supported)
 - Ensure the service exposes port `9377`
 
@@ -706,6 +717,8 @@ fly deploy
 
 - Create a new Web Service → deploy from this GitHub repo
 - Use Docker (recommended) and expose port `9377`
+- Set `CAMOFOX_HOST=0.0.0.0`
+- Set `CAMOFOX_API_KEY` to a strong secret
 - Set `CAMOFOX_PORT=9377` (or rely on Render `PORT`)
 
 ### System Requirements

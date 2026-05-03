@@ -46,12 +46,14 @@ import {
 	pressTab,
 	refreshTab,
 	screenshotTab,
+	scrollTab,
 	scrollElementTab,
 	snapshotTab,
 	calculateTypeTimeoutMs,
+	navigateWithSafetyGuard,
 	typeTab,
 	safePageClose,
-	validateUrl,
+	validateNavigationUrl,
 	waitForPageReady,
 	withTimeout,
 	withTabLock,
@@ -117,6 +119,16 @@ function getTraceArtifactErrorStatus(err: unknown): number {
 	if (message.includes('Invalid trace filename')) return 400;
 	if (message.includes('does not belong to this user')) return 404;
 	if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT') return 404;
+	return 500;
+}
+
+function getRouteErrorStatus(err: unknown): number {
+	if (typeof err === 'object' && err !== null && 'statusCode' in err && typeof err.statusCode === 'number') {
+		return err.statusCode;
+	}
+	if (typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number') {
+		return err.status;
+	}
 	return 500;
 }
 
@@ -339,7 +351,9 @@ router.post(
 				if (validationError) return res.status(400).json({ error: validationError });
 			}
 			if (url) {
-				const urlErr = validateUrl(url);
+				const urlErr = await validateNavigationUrl(url, {
+					allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+				});
 				if (urlErr) return res.status(400).json({ error: urlErr });
 			}
 
@@ -389,13 +403,17 @@ router.post(
 				const page = await session.context.newPage();
 				tabId = crypto.randomUUID();
 				(page as unknown as { __camofox_tabId?: string }).__camofox_tabId = tabId;
-				const tabState = createTabState(page);
+				const tabState = await createTabState(page);
 
 				registerDownloadListener(tabId, String(userId), page);
 				markDownloadsStaged(tabId);
 
 				if (url) {
-					await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					await navigateWithSafetyGuard(page, url, {
+						allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+						waitUntil: 'domcontentloaded',
+						timeout: 30000,
+					});
 					tabState.visitedUrls.add(url);
 				}
 
@@ -423,14 +441,18 @@ router.post(
 				const page = await session.context.newPage();
 				tabId = crypto.randomUUID();
 				(page as unknown as { __camofox_tabId?: string }).__camofox_tabId = tabId;
-				const tabState = createTabState(page);
+				const tabState = await createTabState(page);
 				group.set(tabId, tabState);
 				indexTab(tabId, sessionMapKey);
 
 				registerDownloadListener(tabId, String(userId), page);
 
 				if (url) {
-					await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					await navigateWithSafetyGuard(page, url, {
+						allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+						waitUntil: 'domcontentloaded',
+						timeout: 30000,
+					});
 					tabState.visitedUrls.add(url);
 				}
 
@@ -455,7 +477,7 @@ router.post(
 			}
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'tab create failed', { reqId: req.reqId, error: message });
-			return res.status(500).json({ error: safeError(err) });
+			return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 		}
 	},
 );
@@ -516,10 +538,16 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 					}
 					if (!targetUrl) return { status: 400 as const, body: { error: 'url or macro required' } };
 
-					const urlErr = validateUrl(targetUrl);
+					const urlErr = await validateNavigationUrl(targetUrl, {
+						allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+					});
 					if (urlErr) return { status: 400 as const, body: { error: urlErr } };
 
-					await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					await navigateWithSafetyGuard(tabState.page, targetUrl, {
+						allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+						waitUntil: 'domcontentloaded',
+						timeout: 30000,
+					});
 					tabState.visitedUrls.add(targetUrl);
 					tabState.refs = await buildRefs(tabState.page);
 					return { status: 200 as const, body: { ok: true, url: tabState.page.url() } };
@@ -536,8 +564,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'navigate failed', { reqId: req.reqId, tabId, error: message });
-		const status = err instanceof Error && err.message?.startsWith('Blocked URL scheme') ? 400 : 500;
-		return res.status(status).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -571,7 +598,7 @@ router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unkno
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'snapshot failed', { reqId: req.reqId, tabId: req.params.tabId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -592,7 +619,7 @@ router.post('/tabs/:tabId/wait', async (req: Request<{ tabId: string }, unknown,
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'wait failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -626,11 +653,9 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });
 		return res.json(responseObj);
 	} catch (err) {
-		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'click failed', { reqId: req.reqId, tabId, error: message });
-		if (statusCode === 400) return res.status(400).json({ error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -652,11 +677,9 @@ router.post('/tabs/:tabId/type', async (req: Request<{ tabId: string }, unknown,
 		const result = await withTimeout(typeTab(tabId, tabState, { ref, selector, text: textValue }), calculateTypeTimeoutMs(textValue), 'type');
 		return res.json(result);
 	} catch (err) {
-		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'type failed', { reqId: req.reqId, error: message });
-		if (statusCode === 400) return res.status(400).json({ error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -678,7 +701,7 @@ router.post('/tabs/:tabId/press', async (req: Request<{ tabId: string }, unknown
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'press failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -694,15 +717,12 @@ router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknow
 		if (!found) return res.status(404).json({ error: 'Tab not found' });
 		const { tabState } = found;
 		tabState.toolCalls++;
-		const isHorizontal = direction === 'left' || direction === 'right';
-		const delta = direction === 'up' || direction === 'left' ? -amount : amount;
-		await tabState.page.mouse.wheel(isHorizontal ? delta : 0, isHorizontal ? 0 : delta);
-		await tabState.page.waitForTimeout(300);
-		return res.json({ ok: true });
+		const result = await withTimeout(scrollTab(tabState, { direction, amount }), CONFIG.handlerTimeoutMs, 'scroll');
+		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'scroll failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -739,11 +759,9 @@ router.post(
 			const result = await scrollElementTab(tabId, tabState, { selector, ref, deltaX, deltaY, scrollTo });
 			return res.json(result);
 		} catch (err) {
-			const statusCode = (err as { statusCode?: number } | null)?.statusCode;
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'scroll-element failed', { reqId: req.reqId, tabId, error: message });
-			if (statusCode === 400) return res.status(400).json({ error: message });
-			return res.status(500).json({ error: safeError(err) });
+			return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 		}
 	},
 );
@@ -777,7 +795,7 @@ router.post(
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'evaluate failed', { reqId: req.reqId, tabId, error: message });
-			return res.status(500).json({ error: safeError(err) });
+			return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 		}
 	},
 );
@@ -852,6 +870,10 @@ router.post(
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'evaluate-extended failed', { reqId: req.reqId, tabId, error: message });
+			const status = getRouteErrorStatus(err);
+			if (status === 400) {
+				return res.status(400).json({ ok: false, error: safeError(err), errorType: 'js_error' });
+			}
 
 			if (message.includes('timed out') || message.includes('Timeout')) {
 				return res.status(408).json({ ok: false, error: message, errorType: 'timeout' });
@@ -885,7 +907,7 @@ router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown,
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'back failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -907,7 +929,7 @@ router.post('/tabs/:tabId/forward', async (req: Request<{ tabId: string }, unkno
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'forward failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -929,7 +951,7 @@ router.post('/tabs/:tabId/refresh', async (req: Request<{ tabId: string }, unkno
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'refresh failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
