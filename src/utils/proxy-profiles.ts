@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import type {
   GeoMode,
@@ -24,20 +25,73 @@ export function getConfiguredServerProxy(proxy: ProxyConfig): ResolvedProxyConfi
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateProxyProfile(name: string, profile: unknown): string | null {
+  if (!isRecord(profile)) {
+    return `Profile "${name}" must be an object`;
+  }
+
+  const server = profile.server;
+  if (typeof server !== 'string' || !server.trim()) {
+    return `Profile "${name}" must have a non-empty string "server" field`;
+  }
+
+  // Validate optional fields if present
+  if (profile.username !== undefined && typeof profile.username !== 'string') {
+    return `Profile "${name}" username must be a string`;
+  }
+
+  if (profile.password !== undefined && typeof profile.password !== 'string') {
+    return `Profile "${name}" password must be a string`;
+  }
+
+  if (profile.locale !== undefined && typeof profile.locale !== 'string') {
+    return `Profile "${name}" locale must be a string`;
+  }
+
+  if (profile.timezoneId !== undefined && typeof profile.timezoneId !== 'string') {
+    return `Profile "${name}" timezoneId must be a string`;
+  }
+
+  if (profile.geolocation !== undefined) {
+    if (!isRecord(profile.geolocation)) {
+      return `Profile "${name}" geolocation must be an object`;
+    }
+    const geo = profile.geolocation;
+    if (typeof geo.latitude !== 'number' || geo.latitude < -90 || geo.latitude > 90) {
+      return `Profile "${name}" geolocation.latitude must be a number between -90 and 90`;
+    }
+    if (typeof geo.longitude !== 'number' || geo.longitude < -180 || geo.longitude > 180) {
+      return `Profile "${name}" geolocation.longitude must be a number between -180 and 180`;
+    }
+  }
+
+  return null;
+}
+
 export function loadProxyProfiles(filePath?: string): Record<string, ProxyProfileConfig> {
   if (!filePath) return {};
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
+    const resolved = path.resolve(filePath);
+    const content = fs.readFileSync(resolved, 'utf8');
     const parsed: unknown = JSON.parse(content);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       throw new Error('Proxy profiles file must contain a JSON object');
     }
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).map(([name, profile]) => [
-        name.toLowerCase(),
-        profile as ProxyProfileConfig,
-      ]),
-    ) as Record<string, ProxyProfileConfig>;
+
+    const validated: Record<string, ProxyProfileConfig> = {};
+    for (const [name, profile] of Object.entries(parsed as Record<string, unknown>)) {
+      const error = validateProxyProfile(name, profile);
+      if (error) {
+        throw new Error(error);
+      }
+      validated[name.toLowerCase()] = profile as ProxyProfileConfig;
+    }
+
+    return validated;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Log but don't crash — proxy profiles are optional
@@ -89,13 +143,18 @@ export function resolveSessionProfileInput(
   },
 ): Omit<ResolvedSessionProfile, 'sessionKey'> {
   const geoMode: GeoMode = input.geoMode || 'explicit-wins';
-  const named = input.proxyProfile ? deps.proxyProfiles[input.proxyProfile.toLowerCase()] : null;
 
   // Resolve proxy source
   let proxy: ResolvedProxyConfig | null = null;
   if (input.proxy) {
     proxy = normalizeRawProxy(input.proxy);
-  } else if (named) {
+  } else if (input.proxyProfile) {
+    const named = deps.proxyProfiles[input.proxyProfile.toLowerCase()];
+    if (!named) {
+      const available = Object.keys(deps.proxyProfiles);
+      const availableList = available.length > 0 ? ` Available profiles: ${available.join(', ')}` : '';
+      throw new Error(`Unknown proxy profile: "${input.proxyProfile}".${availableList}`);
+    }
     proxy = {
       source: 'named-profile',
       profileName: input.proxyProfile,
