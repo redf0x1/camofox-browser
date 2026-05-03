@@ -6,7 +6,7 @@ import coreRoutes from './routes/core';
 import openclawRoutes from './routes/openclaw';
 import { installCrashHandlers, safeError } from './middleware/errors';
 import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
-import { loadConfig } from './utils/config';
+import { assertServerExposureSafety, loadConfig } from './utils/config';
 import { closeBrowser } from './services/browser';
 import { contextPool } from './services/context-pool';
 import {
@@ -25,6 +25,7 @@ import { detectYtDlp } from './services/youtube';
 import { stopAllVnc } from './services/vnc';
 
 const CONFIG = loadConfig();
+assertServerExposureSafety(CONFIG);
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -94,8 +95,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
 process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 
-server = app.listen(PORT, () => {
-	log('info', 'server started', { port: PORT, pid: process.pid, nodeVersion: process.version });
+server = app.listen(PORT, CONFIG.host, () => {
+	log('info', 'server started', { port: PORT, host: CONFIG.host, pid: process.pid, nodeVersion: process.version });
 	log('info', 'using persistent profiles', { profilesDir: CONFIG.profilesDir });
 	resetHealth();
 	healthProbeInterval = setInterval(() => {
@@ -112,8 +113,8 @@ server = app.listen(PORT, () => {
 	}, CONFIG.healthProbeIntervalMs);
 	healthProbeInterval.unref();
 	if (!CONFIG.apiKey) {
-		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — protected endpoints will accept unauthenticated requests.');
-		console.warn('[camofox] Set CAMOFOX_API_KEY for production/network-exposed deployments.');
+		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — protected endpoints are only intended for loopback-only deployments.');
+		console.warn('[camofox] Set CAMOFOX_API_KEY before binding CAMOFOX_HOST beyond localhost.');
 	}
 });
 

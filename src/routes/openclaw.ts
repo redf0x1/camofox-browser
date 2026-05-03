@@ -30,11 +30,14 @@ import {
 	buildSnapshotPayload,
 	buildRefs,
 	createTabState,
+	flushBlockedNavigationError,
+	navigateWithSafetyGuard,
 	refToLocator,
 	safePageClose,
 	snapshotTab,
 	smartFill,
-	validateUrl,
+	validateNavigationUrl,
+	withBlockedNavigationTracking,
 	withTabLock,
 	withTimeout,
 } from '../services/tab';
@@ -51,6 +54,16 @@ const PKG_VERSION = (() => {
 })();
 
 const router = Router();
+
+function getRouteErrorStatus(err: unknown): number {
+	if (typeof err === 'object' && err !== null && 'statusCode' in err && typeof err.statusCode === 'number') {
+		return err.statusCode;
+	}
+	if (typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number') {
+		return err.status;
+	}
+	return 500;
+}
 
 
 type LoadStateLike = 'load' | 'domcontentloaded' | 'networkidle';
@@ -104,7 +117,9 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 			return res.status(400).json({ error: 'url is required' });
 		}
 
-		const urlErr = validateUrl(url);
+		const urlErr = await validateNavigationUrl(url, {
+			allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+		});
 		if (urlErr) return res.status(400).json({ error: urlErr });
 
 		const canonical = getCanonicalProfile(userId);
@@ -127,12 +142,16 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		const group = getTabGroup(session, listItemId);
 		const page = await session.context.newPage();
 		const tabId = crypto.randomUUID();
-		const tabState = createTabState(page);
+		const tabState = await createTabState(page);
 		group.set(tabId, tabState);
 		indexTab(tabId, sessionMapKey);
 		registerDownloadListener(tabId, String(userId), page);
 
-		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+		await navigateWithSafetyGuard(page, url, {
+			allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+			waitUntil: 'domcontentloaded',
+			timeout: 30000,
+		});
 		tabState.visitedUrls.add(url);
 
 		log('info', 'openclaw tab opened', { reqId: req.reqId, tabId, url: page.url() });
@@ -146,7 +165,7 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'openclaw tab open failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -208,10 +227,16 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 					}
 					if (!targetUrl) return { status: 400 as const, body: { error: 'url or macro required' } };
 
-					const urlErr = validateUrl(targetUrl);
+					const urlErr = await validateNavigationUrl(targetUrl, {
+						allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+					});
 					if (urlErr) return { status: 400 as const, body: { error: urlErr } };
 
-					await tabState.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+					await navigateWithSafetyGuard(tabState.page, targetUrl, {
+						allowPrivateNetworkTargets: CONFIG.allowPrivateNetworkTargets,
+						waitUntil: 'domcontentloaded',
+						timeout: 30000,
+					});
 					tabState.visitedUrls.add(targetUrl);
 					tabState.refs = await buildRefs(tabState.page);
 					return { status: 200 as const, body: { ok: true, targetId, url: tabState.page.url() } };
@@ -226,7 +251,7 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'openclaw navigate failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -263,7 +288,7 @@ router.get('/snapshot', async (req: Request<unknown, unknown, unknown, { targetI
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'openclaw snapshot failed', { reqId: req.reqId, error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 
@@ -368,15 +393,15 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 						}
 					};
 
-					if (ref) {
-						const locator = await refToLocator(tabState.page, ref, tabState.refs);
-						if (!locator) throw new Error(`Unknown ref: ${ref}`);
-						await doClick(locator);
-					} else {
-						await doClick(String(selector));
-					}
-
-					await tabState.page.waitForTimeout(500);
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						if (ref) {
+							const locator = await refToLocator(tabState.page, ref, tabState.refs);
+							if (!locator) throw new Error(`Unknown ref: ${ref}`);
+							await doClick(locator);
+						} else {
+							await doClick(String(selector));
+						}
+					});
 					tabState.refs = await buildRefs(tabState.page);
 					return { ok: true, targetId, url: tabState.page.url() };
 				}
@@ -391,16 +416,18 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 						throw new Error('text is required');
 					}
 
-					if (ref) {
-						const locator = await refToLocator(tabState.page, ref, tabState.refs);
-						if (!locator) throw new Error(`Unknown ref: ${ref}`);
-						await smartFill(locator, tabState.page, text);
-						if (submit) await tabState.page.keyboard.press('Enter');
-					} else {
-						const locator = tabState.page.locator(String(selector));
-						await smartFill(locator, tabState.page, text);
-						if (submit) await tabState.page.keyboard.press('Enter');
-					}
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						if (ref) {
+							const locator = await refToLocator(tabState.page, ref, tabState.refs);
+							if (!locator) throw new Error(`Unknown ref: ${ref}`);
+							await smartFill(locator, tabState.page, text);
+							if (submit) await tabState.page.keyboard.press('Enter');
+						} else {
+							const locator = tabState.page.locator(String(selector));
+							await smartFill(locator, tabState.page, text);
+							if (submit) await tabState.page.keyboard.press('Enter');
+						}
+					});
 					return { ok: true, targetId };
 				}
 
@@ -414,13 +441,15 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 						throw new Error('value is required');
 					}
 
-					if (ref) {
-						const locator = await refToLocator(tabState.page, ref, tabState.refs);
-						if (!locator) throw new Error(`Unknown ref: ${ref}`);
-						await locator.selectOption(value);
-					} else {
-						await tabState.page.locator(String(selector)).selectOption(value);
-					}
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						if (ref) {
+							const locator = await refToLocator(tabState.page, ref, tabState.refs);
+							if (!locator) throw new Error(`Unknown ref: ${ref}`);
+							await locator.selectOption(value);
+						} else {
+							await tabState.page.locator(String(selector)).selectOption(value);
+						}
+					});
 					return { ok: true, targetId };
 				}
 
@@ -428,7 +457,9 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					const params = body as unknown as ActPressRequest;
 					const { key } = params;
 					if (!key) throw new Error('key is required');
-					await tabState.page.keyboard.press(key);
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						await tabState.page.keyboard.press(key);
+					});
 					return { ok: true, targetId };
 				}
 
@@ -438,16 +469,18 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					const ref = params.ref;
 					const direction = params.direction ?? 'down';
 					const amount = params.amount ?? 500;
-					if (ref) {
-						const locator = await refToLocator(tabState.page, ref, tabState.refs);
-						if (!locator) throw new Error(`Unknown ref: ${ref}`);
-						await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
-					} else {
-						const isHorizontal = direction === 'left' || direction === 'right';
-						const delta = direction === 'up' || direction === 'left' ? -amount : amount;
-						await tabState.page.mouse.wheel(isHorizontal ? delta : 0, isHorizontal ? 0 : delta);
-					}
-					await tabState.page.waitForTimeout(300);
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						if (ref) {
+							const locator = await refToLocator(tabState.page, ref, tabState.refs);
+							if (!locator) throw new Error(`Unknown ref: ${ref}`);
+							await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
+						} else {
+							const isHorizontal = direction === 'left' || direction === 'right';
+							const delta = direction === 'up' || direction === 'left' ? -amount : amount;
+							await tabState.page.mouse.wheel(isHorizontal ? delta : 0, isHorizontal ? 0 : delta);
+						}
+						await tabState.page.waitForTimeout(300);
+					});
 					return { ok: true, targetId };
 				}
 
@@ -455,13 +488,15 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					const params = body as unknown as ActHoverRequest;
 					const { ref, selector } = params;
 					if (!ref && !selector) throw new Error('ref or selector required');
-					if (ref) {
-						const locator = await refToLocator(tabState.page, ref, tabState.refs);
-						if (!locator) throw new Error(`Unknown ref: ${ref}`);
-						await locator.hover({ timeout: 5000 });
-					} else {
-						await tabState.page.locator(String(selector)).hover({ timeout: 5000 });
-					}
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						if (ref) {
+							const locator = await refToLocator(tabState.page, ref, tabState.refs);
+							if (!locator) throw new Error(`Unknown ref: ${ref}`);
+							await locator.hover({ timeout: 5000 });
+						} else {
+							await tabState.page.locator(String(selector)).hover({ timeout: 5000 });
+						}
+					});
 					return { ok: true, targetId };
 				}
 
@@ -470,13 +505,20 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					const { timeMs, text } = params;
 					const loadStateUnknown = (params as { loadState?: unknown }).loadState;
 					const loadState = typeof loadStateUnknown === 'string' && isLoadState(loadStateUnknown) ? loadStateUnknown : undefined;
-					if (timeMs) {
-						await tabState.page.waitForTimeout(timeMs);
-					} else if (text) {
-						await tabState.page.waitForSelector(`text=${text}`, { timeout: 30000 });
-					} else if (loadState) {
-						await tabState.page.waitForLoadState(loadState, { timeout: 30000 });
-					}
+					await withBlockedNavigationTracking(tabState.page, async () => {
+						try {
+							if (timeMs) {
+								await tabState.page.waitForTimeout(timeMs);
+							} else if (text) {
+								await tabState.page.waitForSelector(`text=${text}`, { timeout: 30000 });
+							} else if (loadState) {
+								await tabState.page.waitForLoadState(loadState, { timeout: 30000 });
+							}
+						} catch (err) {
+							await flushBlockedNavigationError(tabState.page);
+							throw err;
+						}
+					});
 					return { ok: true, targetId, url: tabState.page.url() };
 				}
 
@@ -502,11 +544,9 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		const statusCode = (err as { statusCode?: number } | null)?.statusCode;
 		const kindFromBody = typeof (req.body as { kind?: unknown }).kind === 'string' ? (req.body as { kind?: unknown }).kind : undefined;
 		log('error', 'act failed', { reqId: req.reqId, kind: kindFromBody, error: message });
-		if (statusCode === 400) return res.status(400).json({ error: message });
-		return res.status(500).json({ error: safeError(err) });
+		return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
 	}
 });
 

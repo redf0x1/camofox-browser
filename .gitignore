@@ -48,3 +48,4 @@ playwright-report/
 CLAUDE.md
 AGENTS.md
 production
+docs/*

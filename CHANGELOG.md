@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+- Server bind now defaults to `127.0.0.1` via `CAMOFOX_HOST`, and startup refuses non-loopback binds unless `CAMOFOX_API_KEY` is configured.
+- Navigation target validation now blocks loopback/private/link-local/metadata hosts on non-loopback deployments by default, with an explicit `CAMOFOX_ALLOW_PRIVATE_NETWORK=true` override for trusted environments.
+- Proxy-enabled non-loopback deployments now fail fast unless `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`, avoiding unsupported proxy/split-DNS safety claims.
+
+### Tests
+- Added regression coverage for bind-host safety, protected-route auth on loopback vs API-key deployments, and private-network URL validation.
+
 ## [2.3.0] - 2026-05-03
 
 ### Upgrade Notes
