@@ -654,6 +654,7 @@ router.post('/tabs/:tabId/wait', async (req: Request<{ tabId: string }, unknown,
 
 		const { tabState } = found;
 		const ready = await waitForPageReady(tabState.page, { timeout, waitForNetwork });
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true, ready });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -835,6 +836,7 @@ router.post(
 			tabState.toolCalls++;
 
 			const result = await evaluateTab(tabId, tabState, { expression, timeout });
+			lifecycleController.recordInteractiveActivity();
 			return res.json(result);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -903,13 +905,16 @@ router.post(
 			);
 
 			if (result.ok) {
+				lifecycleController.recordInteractiveActivity();
 				return res.json(result);
 			}
 
 			if (result.errorType === 'timeout') {
+				lifecycleController.recordInteractiveActivity();
 				return res.status(408).json(result);
 			}
 
+			lifecycleController.recordInteractiveActivity();
 			return res.status(500).json(result);
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -1198,6 +1203,7 @@ router.delete('/tabs/group/:listItemId', async (req: Request<{ listItemId: strin
 				sessionKey,
 			});
 		}
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -1217,6 +1223,7 @@ router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res:
 		await closeSessionsForUser(userId);
 		// Ensure downloads are cleaned even if the session was already partially removed.
 		cleanupUserDownloads(userId);
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
