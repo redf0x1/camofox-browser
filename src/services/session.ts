@@ -61,6 +61,10 @@ export function __getUserConcurrencyStateForTests(userId: string): { active: num
 	return { active: state.active, queueLength: state.queue.length };
 }
 
+export function __getSessionsMapForTests(): Map<string, SessionData> {
+	return sessions;
+}
+
 export async function withUserLimit<T>(
 	userId: string,
 	maxConcurrent: number,
@@ -689,17 +693,27 @@ export async function runLifecycleIdleCleanup(
 	}
 	
 	// Close the specific contexts from the snapshot
+	const actuallyClosedUsers = new Set<string>();
 	for (const { profileKey, createdAt, lastAccess } of contextsToClose) {
 		try {
 			await contextPool.closeContextIfMatches(profileKey, createdAt, lastAccess);
+			// Verify the context was actually closed (not skipped due to reuse)
+			const stillExists = contextPool.getEntry(profileKey);
+			if (!stillExists) {
+				// Context was actually closed, mark user for session cleanup
+				const entry = contextSnapshot.get(profileKey);
+				if (entry) {
+					actuallyClosedUsers.add(entry.userId);
+				}
+			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'idle cleanup failed to close context', { profileKey, error: message });
 		}
 	}
 	
-	// Clean up session data for users who had contexts closed
-	for (const userId of usersToCleanup) {
+	// Clean up session data ONLY for users whose contexts were actually closed
+	for (const userId of actuallyClosedUsers) {
 		cleanupSessionsForUserId(userId, 'idle_cleanup', false);
 		closedUsers.push(userId);
 	}
