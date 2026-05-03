@@ -680,18 +680,18 @@ export async function runLifecycleIdleCleanup(
 	}
 	
 	// Close only the specific contexts from the snapshot that were created before cleanup started
-	const contextsToClose: Array<{ profileKey: string; createdAt: number }> = [];
+	const contextsToClose: Array<{ profileKey: string; createdAt: number; lastAccess: number }> = [];
 	for (const [profileKey, entry] of contextSnapshot.entries()) {
 		// Skip staged, launching, or newly-created contexts
 		if (usersToCleanup.has(entry.userId) && !entry.staged && !entry.launching && entry.createdAt < cleanupStartedMs) {
-			contextsToClose.push({ profileKey, createdAt: entry.createdAt });
+			contextsToClose.push({ profileKey, createdAt: entry.createdAt, lastAccess: entry.lastAccess });
 		}
 	}
 	
 	// Close the specific contexts from the snapshot
-	for (const { profileKey, createdAt } of contextsToClose) {
+	for (const { profileKey, createdAt, lastAccess } of contextsToClose) {
 		try {
-			await contextPool.closeContextIfMatches(profileKey, createdAt);
+			await contextPool.closeContextIfMatches(profileKey, createdAt, lastAccess);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'idle cleanup failed to close context', { profileKey, error: message });

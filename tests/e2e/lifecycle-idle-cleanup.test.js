@@ -189,4 +189,74 @@ describe('Lifecycle idle cleanup (Stage 1)', () => {
     const healthData = await health.json();
     expect(healthData.poolSize).toBe(1);
   }, 30000);
+
+  test('cleanup does not close reused contexts', async () => {
+    await startServer(0, {
+      CAMOFOX_IDLE_TIMEOUT_MS: '1000',
+      CAMOFOX_IDLE_EXIT_TIMEOUT_MS: '10000',
+      CAMOFOX_API_KEY: '',
+    });
+    serverUrl = getServerUrl();
+
+    const userId = 'reuse-race-user';
+    const sessionKey = 'default';
+
+    // Step 1: Create a tab to initialize context
+    const createTab1 = await fetch(`${serverUrl}/tabs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        sessionKey,
+        url: 'https://example.com',
+      }),
+    });
+    expect(createTab1.status).toBe(200);
+    const { tabId: tabId1 } = await createTab1.json();
+
+    // Step 2: Delete the tab immediately (session now has 0 tabs)
+    const deleteTab1 = await fetch(`${serverUrl}/tabs/${tabId1}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, sessionKey }),
+    });
+    expect(deleteTab1.status).toBe(200);
+
+    // Step 3: Wait for cleanup to be triggered (just past idle timeout)
+    // Cleanup interval is 250ms, so wait 1100ms to ensure cleanup has started
+    await new Promise((r) => setTimeout(r, 1100));
+
+    // Step 4: Immediately create a new tab (will reuse the context)
+    // This happens WHILE cleanup might still be processing
+    const createTab2 = await fetch(`${serverUrl}/tabs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        sessionKey,
+        url: 'https://example.com/page2',
+      }),
+    });
+    expect(createTab2.status).toBe(200);
+    const { tabId: tabId2 } = await createTab2.json();
+    expect(tabId2).toBeTruthy();
+
+    // Step 5: Verify the new tab's context is still functional
+    // Try to navigate the tab - this will fail if context was closed
+    const navigate = await fetch(`${serverUrl}/tabs/${tabId2}/navigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        sessionKey,
+        url: 'https://example.com/working',
+      }),
+    });
+    expect(navigate.status).toBe(200);
+
+    // Step 6: Verify pool still has the context
+    const health = await fetch(`${serverUrl}/health`);
+    const healthData = await health.json();
+    expect(healthData.poolSize).toBe(1);
+  }, 30000);
 });

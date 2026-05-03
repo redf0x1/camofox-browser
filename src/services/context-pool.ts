@@ -553,11 +553,13 @@ export class ContextPool {
 		}
 	}
 
-	async closeContextIfMatches(profileKey: string, expectedCreatedAt: number): Promise<void> {
+	async closeContextIfMatches(profileKey: string, expectedCreatedAt: number, expectedLastAccess?: number): Promise<void> {
 		const normalized = String(profileKey);
 		const entry = this.pool.get(normalized);
 		if (!entry) return;
 		if (entry.createdAt !== expectedCreatedAt) return;
+		// If lastAccess was provided and has changed, the context was reused - don't close
+		if (expectedLastAccess !== undefined && entry.lastAccess !== expectedLastAccess) return;
 		await this.closeContext(normalized);
 	}
 
