@@ -96,6 +96,7 @@ export interface AppConfig {
   vncBasePort: number;
   vncHost: string;
   presetsFile: string | undefined;
+  proxyProfilesFile: string | undefined;
   idleTimeoutMs: number;
   buildRefsTimeoutMs: number;
   tabLockTimeoutMs: number;
@@ -285,6 +286,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const vncBasePort = Math.max(1, parsePositiveIntOrDefault(env.CAMOFOX_VNC_BASE_PORT, 6080));
   const vncHost = env.CAMOFOX_VNC_HOST || 'localhost';
   const presetsFile = env.CAMOFOX_PRESETS_FILE || undefined;
+  const proxyProfilesFile = env.CAMOFOX_PROXY_PROFILES_FILE || undefined;
   const idleTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_IDLE_TIMEOUT_MS, 1800000);
 
   return {
@@ -317,6 +319,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     vncBasePort,
     vncHost,
     presetsFile,
+    proxyProfilesFile,
     idleTimeoutMs,
     buildRefsTimeoutMs,
     tabLockTimeoutMs,

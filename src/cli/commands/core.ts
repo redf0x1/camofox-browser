@@ -22,16 +22,35 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 		.option('--user <user>', 'user id')
 		.option('--viewport <WxH>', 'viewport like 1280x720')
 		.option('--geo <preset>', 'geo preset name')
-		.action(async (url: string, options: { user?: string; viewport?: string; geo?: string }, command: Command) => {
+		.option('--proxy-profile <name>', 'named proxy profile')
+		.option('--proxy-host <host>', 'session-level proxy host')
+		.option('--proxy-port <port>', 'session-level proxy port')
+		.option('--proxy-username <user>', 'session-level proxy username')
+		.option('--proxy-password <pass>', 'session-level proxy password')
+		.option('--geo-mode <mode>', 'explicit-wins or proxy-locked')
+		.action(async (url: string, options: { user?: string; viewport?: string; geo?: string; proxyProfile?: string; proxyHost?: string; proxyPort?: string; proxyUsername?: string; proxyPassword?: string; geoMode?: string }, command: Command) => {
 			try {
 				const userId = resolveCommandUser({ command, user: options.user });
 				const viewport = parseViewport(options.viewport);
+				
+				const proxy = options.proxyHost && options.proxyPort
+					? {
+							host: options.proxyHost,
+							port: parseInt(options.proxyPort, 10),
+							username: options.proxyUsername,
+							password: options.proxyPassword,
+						}
+					: undefined;
+
 				const response = await context.getTransport().post<{ tabId?: string; targetId?: string }>('/tabs', {
 					url,
 					userId,
 					sessionKey: 'default',
 					viewport,
 					preset: options.geo,
+					proxyProfile: options.proxyProfile,
+					proxy,
+					geoMode: options.geoMode,
 				});
 
 				const tabId = (response.data as { tabId?: string; targetId?: string }).tabId ?? (response.data as { targetId?: string }).targetId;
@@ -48,7 +67,7 @@ export function registerCoreCommands(program: Command, context: CliContext): voi
 		})
 		.addHelpText(
 			'after',
-			`\nExamples:\n  $ camofox open https://google.com\n  $ camofox open https://gmail.com --user myaccount\n`,
+			`\nExamples:\n  $ camofox open https://google.com\n  $ camofox open https://gmail.com --user myaccount\n  $ camofox open https://example.com --proxy-profile tokyo-exit\n  $ camofox open https://example.com --proxy-host proxy.example.com --proxy-port 8080\n`,
 		);
 
 	program

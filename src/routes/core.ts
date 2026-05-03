@@ -345,7 +345,7 @@ router.post(
 			createUserId = String(userId);
 
 			// Check for session profile conflict (proxy/geo drift)
-			if (proxy || proxyProfile) {
+			if (proxy || proxyProfile || geoMode) {
 				const { resolveSessionProfileInput, getConfiguredServerProxy, loadProxyProfiles } = await import('../utils/proxy-profiles');
 				const { establishSessionProfile } = await import('../services/session');
 				const profileInput = {
@@ -360,7 +360,7 @@ router.post(
 				};
 				const deps = {
 					serverProxy: getConfiguredServerProxy(CONFIG.proxy),
-					proxyProfiles: loadProxyProfiles((CONFIG as any).proxyProfilesPath),
+					proxyProfiles: loadProxyProfiles(CONFIG.proxyProfilesFile),
 				};
 				try {
 					const resolvedProfileBase = resolveSessionProfileInput(profileInput, deps);

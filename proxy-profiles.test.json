@@ -1,0 +1,22 @@
+{
+  "tokyo-exit": {
+    "server": "http://tokyo.proxy.example.com:8080",
+    "username": "test-user",
+    "password": "test-pass",
+    "locale": "ja-JP",
+    "timezoneId": "Asia/Tokyo",
+    "geolocation": {
+      "latitude": 35.6762,
+      "longitude": 139.6503
+    }
+  },
+  "berlin-exit": {
+    "server": "http://berlin.proxy.example.com:8080",
+    "locale": "de-DE",
+    "timezoneId": "Europe/Berlin",
+    "geolocation": {
+      "latitude": 52.52,
+      "longitude": 13.405
+    }
+  }
+}
