@@ -736,14 +736,12 @@ Define proxy profiles in a JSON file and point `CAMOFOX_PROXY_PROFILES_FILE` to 
 ```json
 {
   "tokyo-exit": {
-    "host": "tokyo.proxy.example.com",
-    "port": 8080,
+    "server": "http://tokyo.proxy.example.com:8080",
     "username": "user",
     "password": "pass"
   },
   "london-exit": {
-    "host": "london.proxy.example.com",
-    "port": 8080
+    "server": "http://london.proxy.example.com:8080"
   }
 }
 ```

@@ -20,8 +20,7 @@
 - Proxy-enabled non-loopback deployments now fail fast unless `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`, avoiding unsupported proxy/split-DNS safety claims.
 
 ### Tests
-- Added regression coverage for bind-host safety, protected-route auth on loopback vs API-key deployments, and private-network URL validation.
-- Added E2E coverage for session-level proxy/geo overrides, geo mode behavior, session profile conflicts, and OpenClaw proxy/geo support.
+- Added E2E coverage for session-level proxy/geo overrides (`tests/e2e/proxy-geo-overrides.test.js`), OpenClaw proxy/geo support (`tests/e2e/proxy-geo-openclaw.test.js`), and context pool profileKey eviction (`tests/unit/context-pool-proxy-geo.test.js`).
 
 ## [2.3.0] - 2026-05-03
 

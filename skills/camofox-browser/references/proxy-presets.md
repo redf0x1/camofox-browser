@@ -107,7 +107,7 @@ When configured, these values:
 Session-level proxy overrides the server baseline for that specific `userId + sessionKey`.
 
 ### Session identity and reuse
-Implemented in `src/services/session-profile-resolver.ts`:
+Implemented in `src/utils/proxy-profiles.ts` and `src/services/session.ts`:
 - Proxy/geo configuration is scoped by `userId + sessionKey`, not just `userId`
 - The same `userId` may run different `sessionKey` profiles in parallel with different proxy/geo
 - The same `userId + sessionKey` combination maintains a stable identity:
@@ -132,14 +132,12 @@ CAMOFOX_PROXY_PROFILES_FILE=/absolute/path/to/proxy-profiles.json
 ```json
 {
   "tokyo-exit": {
-    "host": "tokyo.proxy.example.com",
-    "port": 8080,
+    "server": "http://tokyo.proxy.example.com:8080",
     "username": "user",
     "password": "pass"
   },
   "london-exit": {
-    "host": "london.proxy.example.com",
-    "port": 8080
+    "server": "http://london.proxy.example.com:8080"
   }
 }
 ```
@@ -164,7 +162,7 @@ POST /tabs
 - File is loaded at module init via `src/utils/proxy-profiles.ts`
 - Profile names are normalized to lowercase
 - Invalid or missing files log warnings but do not crash startup
-- Profiles are validated for required `host` and `port` fields
+- Profiles are validated for required `server` field (must be non-empty string)
 
 ---
 
@@ -186,7 +184,7 @@ CamoFox offers two geo modes that control how explicit geo fields interact with 
 - Example: proxy exits in London with `preset: "japan"` — request is rejected
 
 ### Implementation
-Resolved in `src/services/session-profile-resolver.ts`:
+Resolved in `src/utils/proxy-profiles.ts` and `src/services/session.ts`:
 - Default mode is `explicit-wins`
 - Mode is part of the session profile identity
 - Changing `geoMode` for an existing `userId + sessionKey` is rejected
