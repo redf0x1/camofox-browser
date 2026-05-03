@@ -25,6 +25,8 @@ export interface ServerEnv {
   MAX_CONCURRENT_PER_USER?: string;
   CAMOFOX_ADMIN_KEY?: string;
   CAMOFOX_API_KEY?: string;
+  CAMOFOX_HOST?: string;
+  CAMOFOX_ALLOW_PRIVATE_NETWORK?: string;
   CAMOFOX_CONSOLE_BUFFER_SIZE?: string;
   CAMOFOX_COOKIES_DIR?: string;
   CAMOFOX_PROFILES_DIR?: string;
@@ -65,9 +67,11 @@ export interface ServerEnv {
 
 export interface AppConfig {
   port: number;
+  host: string;
   nodeEnv: string;
   adminKey: string;
   apiKey: string;
+  allowPrivateNetworkTargets: boolean;
   cookiesDir: string;
   profilesDir: string;
   downloadsDir: string;
@@ -112,6 +116,8 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   NODE_ENV?: string;
   CAMOFOX_ADMIN_KEY?: string;
   CAMOFOX_API_KEY?: string;
+  CAMOFOX_HOST?: string;
+  CAMOFOX_ALLOW_PRIVATE_NETWORK?: string;
   CAMOFOX_CONSOLE_BUFFER_SIZE?: string;
   CAMOFOX_COOKIES_DIR?: string;
   CAMOFOX_PROFILES_DIR?: string;
@@ -172,9 +178,53 @@ function parsePort(raw: string, source: string): number {
   return parsed;
 }
 
+function parseOptionalBoolean(raw: string | undefined): boolean | null {
+  if (raw === undefined) return null;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+  throw new Error(`Expected boolean value (true/false) but got: ${JSON.stringify(raw)}`);
+}
+
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  if (normalized === 'localhost' || normalized === '::1' || normalized === '[::1]') return true;
+
+  const ipv4Parts = normalized.split('.');
+  if (ipv4Parts.length === 4) {
+    const octets = ipv4Parts.map((part) => Number.parseInt(part, 10));
+    if (octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)) {
+      return octets[0] === 127;
+    }
+  }
+
+  return false;
+}
+
+function hasConfiguredProxy(proxy: Pick<ProxyConfig, 'host' | 'port'>): boolean {
+  return Boolean(proxy.host && proxy.port);
+}
+
+export function assertServerExposureSafety(
+  config: Pick<AppConfig, 'host' | 'apiKey' | 'allowPrivateNetworkTargets' | 'proxy'>,
+): void {
+  if (!isLoopbackHost(config.host) && !config.apiKey) {
+    throw new Error('CAMOFOX_API_KEY is required when CAMOFOX_HOST exposes the server beyond loopback');
+  }
+  if (!isLoopbackHost(config.host) && !config.allowPrivateNetworkTargets && hasConfiguredProxy(config.proxy)) {
+    throw new Error(
+      'Proxy-enabled non-loopback deployments must set CAMOFOX_ALLOW_PRIVATE_NETWORK=true until proxy-side private-target validation is supported',
+    );
+  }
+}
+
 export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const portRaw = env.CAMOFOX_PORT || env.PORT || '9377';
   const port = parsePort(portRaw, env.CAMOFOX_PORT ? 'CAMOFOX_PORT' : env.PORT ? 'PORT' : 'default port');
+  const host = (env.CAMOFOX_HOST || '127.0.0.1').trim();
+  if (!host) {
+    throw new Error('CAMOFOX_HOST must be a non-empty string');
+  }
 
   const cookiesDir = env.CAMOFOX_COOKIES_DIR || join(os.homedir(), '.camofox', 'cookies');
   if (typeof cookiesDir !== 'string' || !cookiesDir) {
@@ -212,6 +262,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     : env.CAMOFOX_HEADLESS === 'virtual'
       ? 'virtual'
       : true;
+  const allowPrivateNetworkOverride = parseOptionalBoolean(env.CAMOFOX_ALLOW_PRIVATE_NETWORK);
+  const allowPrivateNetworkTargets = allowPrivateNetworkOverride ?? isLoopbackHost(host);
   const evalExtendedRateLimitMax = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX, 20);
   const evalExtendedRateLimitWindowMs = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS, 60000);
 
@@ -235,9 +287,11 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
 
   return {
     port,
+    host,
     nodeEnv: env.NODE_ENV || 'development',
     adminKey: env.CAMOFOX_ADMIN_KEY || '',
     apiKey: env.CAMOFOX_API_KEY || '',
+    allowPrivateNetworkTargets,
     cookiesDir,
     profilesDir,
     downloadsDir,
@@ -284,6 +338,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       HOME: env.HOME,
       NODE_ENV: env.NODE_ENV,
       DISPLAY: env.DISPLAY,
+      CAMOFOX_HOST: env.CAMOFOX_HOST,
+      CAMOFOX_ALLOW_PRIVATE_NETWORK: env.CAMOFOX_ALLOW_PRIVATE_NETWORK,
       HANDLER_TIMEOUT_MS: env.HANDLER_TIMEOUT_MS,
       MAX_CONCURRENT_PER_USER: env.MAX_CONCURRENT_PER_USER,
       CAMOFOX_ADMIN_KEY: env.CAMOFOX_ADMIN_KEY,
