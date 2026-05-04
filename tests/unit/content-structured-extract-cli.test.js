@@ -76,4 +76,16 @@ describe('extract-structured CLI command (unit)', () => {
       schema: { kind: 'object', fields: { title: { kind: 'text', selector: 'h1' } } },
     });
   });
+
+  test('surfaces a schema-file-specific error when @file cannot be read', async () => {
+    const program = new Command();
+    registerContentCommands(program, makeContext(jest.fn(), []));
+
+    await expect(
+      program.parseAsync(
+        ['node', 'camofox', 'extract-structured', '@/tmp/does-not-exist-structured-schema.json', 'tab-3', '--user', 'user-3'],
+        { from: 'node' },
+      ),
+    ).rejects.toThrow(/Cannot load structured schema from file/);
+  });
 });

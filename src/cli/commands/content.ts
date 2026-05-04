@@ -70,7 +70,16 @@ function toSearchUrl(engine: SearchEngine, query: string): string {
 }
 
 function parseStructuredSchemaArg(input: string): unknown {
-	const raw = input.startsWith('@') ? readFileSync(input.slice(1), 'utf8') : input;
+	let raw = input;
+	if (input.startsWith('@')) {
+		try {
+			raw = readFileSync(input.slice(1), 'utf8');
+		} catch (error) {
+			throw new Error(
+				`Cannot load structured schema from file: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
 	try {
 		return JSON.parse(raw) as unknown;
 	} catch (error) {
