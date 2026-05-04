@@ -19,9 +19,49 @@ function createScope(node, baseUrl = 'https://shop.example/catalog') {
   };
 }
 
+function createLocator(nodes) {
+  return {
+    locator(selector) {
+      const matches = nodes.flatMap((node) => node.children?.[selector] || []);
+      return createLocator(matches);
+    },
+    async count() {
+      return nodes.length;
+    },
+    nth(index) {
+      return createLocator([nodes[index]]);
+    },
+    async textContent() {
+      return nodes[0]?.text ?? null;
+    },
+    async evaluate(fn) {
+      return fn({ innerHTML: nodes[0]?.html ?? null });
+    },
+    async getAttribute(name) {
+      return nodes[0]?.attrs?.[name] ?? null;
+    },
+  };
+}
+
+function createPage(rootNode, pageUrl = 'https://shop.example/catalog') {
+  return {
+    url() {
+      return pageUrl;
+    },
+    locator(selector) {
+      if (selector !== 'html') {
+        throw new Error(`unexpected page locator selector: ${selector}`);
+      }
+      return createLocator([rootNode]);
+    },
+  };
+}
+
 describe('structured-extractor runtime (unit)', () => {
   /** @type {(scope:any, schema:any, path?:string) => Promise<any>} */
   let extractStructuredFromScope;
+  /** @type {(page:any, schema:any) => Promise<any>} */
+  let extractStructuredData;
   /** @type {any} */
   let StructuredExtractRuntimeError;
 
@@ -29,6 +69,7 @@ describe('structured-extractor runtime (unit)', () => {
     jest.resetModules();
     ({
       extractStructuredFromScope,
+      extractStructuredData,
       StructuredExtractRuntimeError,
     } = require('../../dist/src/services/structured-extractor'));
   });
@@ -161,8 +202,6 @@ describe('structured-extractor runtime (unit)', () => {
     });
   });
 
-
-
   test('applies join before number coercion for scalar fields', async () => {
     const scope = createScope({
       children: {
@@ -185,6 +224,47 @@ describe('structured-extractor runtime (unit)', () => {
     });
 
     expect(data).toEqual({ price: 19.99 });
+  });
+
+  test('extractStructuredData uses first matched root, reports matchedRoots, and normalizes urls from page url', async () => {
+    const page = createPage(
+      {
+        children: {
+          '.card': [
+            {
+              children: {
+                '.title': [{ text: 'First card' }],
+                'a.details': [{ attrs: { href: '/items/first-card' } }],
+              },
+            },
+            {
+              children: {
+                '.title': [{ text: 'Second card' }],
+                'a.details': [{ attrs: { href: '/items/second-card' } }],
+              },
+            },
+          ],
+        },
+      },
+      'https://shop.example/catalog?page=2',
+    );
+
+    const result = await extractStructuredData(page, {
+      kind: 'object',
+      selector: '.card',
+      fields: {
+        title: { kind: 'text', selector: '.title', required: true, trim: true },
+        href: { kind: 'url', selector: 'a.details', attr: 'href', required: true },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      title: 'First card',
+      href: 'https://shop.example/items/first-card',
+    });
+    expect(result.metadata.matchedRoots).toBe(2);
+    expect(result.metadata.extractionTimeMs).toEqual(expect.any(Number));
   });
 
   test('validates raw schemas passed to extractStructuredFromScope even when a path key is present', async () => {
@@ -214,6 +294,47 @@ describe('structured-extractor runtime (unit)', () => {
         },
       }),
     ).rejects.toBeInstanceOf(StructuredExtractSchemaError);
+  });
+
+  test('extractStructuredData propagates required failures with stable runtime metadata', async () => {
+    const page = createPage({
+      children: {
+        '.card': [
+          {
+            children: {
+              '.title': [{ text: 'Only card' }],
+            },
+          },
+        ],
+      },
+    });
+
+    await expect(
+      extractStructuredData(page, {
+        kind: 'object',
+        selector: '.card',
+        fields: {
+          title: { kind: 'text', selector: '.title', required: true, trim: true },
+          missing: { kind: 'text', selector: '.missing', required: true, trim: true },
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: 'StructuredExtractRuntimeError',
+      statusCode: 422,
+      fieldPath: 'data.missing',
+      reason: 'required',
+    });
+
+    await expect(
+      extractStructuredData(page, {
+        kind: 'object',
+        selector: '.card',
+        fields: {
+          title: { kind: 'text', selector: '.title', required: true, trim: true },
+          missing: { kind: 'text', selector: '.missing', required: true, trim: true },
+        },
+      }),
+    ).rejects.toBeInstanceOf(StructuredExtractRuntimeError);
   });
 
   test('throws stable runtime errors for missing required nested fields', async () => {
