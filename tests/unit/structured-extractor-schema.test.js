@@ -187,6 +187,30 @@ describe('structured-extractor schema validation (unit)', () => {
     ).toThrow('schema.fields.title.selector must be a CSS selector');
   });
 
+  test('accepts valid CSS pseudo-classes and functional selectors', () => {
+    const compiled = validateStructuredExtractSchema({
+      kind: 'object',
+      fields: {
+        anyLink: {
+          kind: 'text',
+          selector: 'a:any-link',
+        },
+        fullscreenVideo: {
+          kind: 'text',
+          selector: 'video:fullscreen',
+        },
+        scoped: {
+          kind: 'text',
+          selector: ':where(.x)',
+        },
+      },
+    });
+
+    expect(compiled.fields.anyLink.selector).toBe('a:any-link');
+    expect(compiled.fields.fullscreenVideo.selector).toBe('video:fullscreen');
+    expect(compiled.fields.scoped.selector).toBe(':where(.x)');
+  });
+
   test('rejects additional non-CSS selector syntax with structured schema errors', () => {
     const invalidSelectors = [
       'internal:role=button',
