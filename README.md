@@ -796,6 +796,13 @@ Then use profiles by name in API requests or CLI commands.
 | `CAMOFOX_FAILURE_THRESHOLD` | `3` | Consecutive failures before health degradation |
 | `CAMOFOX_YT_DLP_TIMEOUT_MS` | `30000` | Timeout for yt-dlp subtitle extraction |
 | `CAMOFOX_YT_BROWSER_TIMEOUT_MS` | `25000` | Timeout for browser transcript fallback |
+| `CAMOFOX_OS` | (unset) | Optional server-wide Camoufox OS override (`windows`, `macos`, `linux`, or comma-separated list for randomization) |
+| `CAMOFOX_ALLOW_WEBGL` | (unset) | Optional server-wide WebGL override; malformed values fail startup |
+| `CAMOFOX_SCREEN_WIDTH` | (unset) | Optional screen width override; applied only with `CAMOFOX_SCREEN_HEIGHT` |
+| `CAMOFOX_SCREEN_HEIGHT` | (unset) | Optional screen height override; applied only with `CAMOFOX_SCREEN_WIDTH` |
+| `CAMOFOX_HUMANIZE` | (unset) | Optional server-wide humanization override |
+
+> Existing persisted fingerprint sidecars are not rotated automatically. New env defaults affect newly generated fingerprints; reset the profile or delete `fingerprint.json` if you want an existing profile to regenerate under the new OS defaults.
 
 ### Idle Lifecycle Policy
 
