@@ -84,6 +84,9 @@ export class LifecycleController {
   }
 
   shouldRunCleanup(now = this.now()): boolean {
+    if (this.cleanupState === 'in_progress') {
+      return false;
+    }
     if (this.cleanupFinishedMs !== null) {
       return false;
     }

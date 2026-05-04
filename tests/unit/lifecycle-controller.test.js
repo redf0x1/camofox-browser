@@ -132,4 +132,27 @@ describe('LifecycleController', () => {
 
     expect(controller.snapshot().cleanupState).toBe('idle');
   });
+
+  test('shouldRunCleanup blocks reentry while cleanup is in progress', () => {
+    const controller = new LifecycleController({
+      idleCleanupTimeoutMs: 1000,
+      idleExitTimeoutMs: 1000,
+      now: () => 10000,
+    });
+
+    controller.syncLiveState({ liveSessions: 0, liveTabs: 0, launchingContexts: 0, stagedCreates: 0 });
+
+    // Cleanup should be eligible after idle timeout
+    expect(controller.shouldRunCleanup(11001)).toBe(true);
+
+    // Mark cleanup started
+    controller.markCleanupStarted(11001);
+
+    // Subsequent tick should NOT trigger another cleanup (reentry blocked)
+    expect(controller.shouldRunCleanup(11250)).toBe(false);
+
+    // After cleanup finishes, should still be blocked (already finished)
+    controller.markCleanupFinished('success', 11500);
+    expect(controller.shouldRunCleanup(11600)).toBe(false);
+  });
 });
