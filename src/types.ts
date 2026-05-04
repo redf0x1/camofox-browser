@@ -228,6 +228,8 @@ export type StructuredExtractSchema =
   | StructuredExtractObjectSchema
   | StructuredExtractListSchema;
 
+export type StructuredExtractRootSchema = StructuredExtractObjectSchema | StructuredExtractListSchema;
+
 export interface StructuredExtractMetadata {
   extractionTimeMs: number;
   matchedRoots?: number;

@@ -2,6 +2,7 @@ import type {
 	StructuredExtractListSchema,
 	StructuredExtractObjectSchema,
 	StructuredExtractResult,
+	StructuredExtractRootSchema,
 	StructuredExtractScalarSchema,
 	StructuredExtractSchema,
 	StructuredScalarKind,
@@ -23,6 +24,10 @@ type CompiledStructuredExtractListSchema = Omit<StructuredExtractListSchema, 'it
 
 export type CompiledStructuredExtractSchema =
 	| CompiledStructuredExtractScalarSchema
+	| CompiledStructuredExtractObjectSchema
+	| CompiledStructuredExtractListSchema;
+
+export type CompiledStructuredExtractRootSchema =
 	| CompiledStructuredExtractObjectSchema
 	| CompiledStructuredExtractListSchema;
 
@@ -147,7 +152,7 @@ function validateScalarSchema(path: string, schema: StructuredExtractScalarSchem
 	};
 }
 
-export function validateStructuredExtractSchema(
+function validateStructuredExtractNode(
 	schema: StructuredExtractSchema,
 	path = 'schema',
 ): CompiledStructuredExtractSchema {
@@ -168,7 +173,7 @@ export function validateStructuredExtractSchema(
 		const fields = Object.fromEntries(
 			Object.entries(schema.fields).map(([key, value]) => [
 				key,
-				validateStructuredExtractSchema(value as StructuredExtractSchema, `${path}.fields.${key}`),
+				validateStructuredExtractNode(value as StructuredExtractSchema, `${path}.fields.${key}`),
 			]),
 		);
 		return {
@@ -190,12 +195,19 @@ export function validateStructuredExtractSchema(
 			kind: 'list',
 			selector: schema.selector,
 			required: schema.required,
-			item: validateStructuredExtractSchema(schema.item, `${path}.item`),
+			item: validateStructuredExtractNode(schema.item, `${path}.item`),
 			path,
 		};
 	}
 
 	return validateScalarSchema(path, schema);
+}
+
+export function validateStructuredExtractSchema(
+	schema: StructuredExtractRootSchema,
+	path = 'schema',
+): CompiledStructuredExtractRootSchema {
+	return validateStructuredExtractNode(schema, path) as CompiledStructuredExtractRootSchema;
 }
 
 export async function extractStructuredData(): Promise<StructuredExtractResult> {

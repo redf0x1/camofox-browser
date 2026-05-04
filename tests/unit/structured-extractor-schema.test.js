@@ -33,6 +33,22 @@ describe('structured-extractor schema validation (unit)', () => {
     expect(compiled.fields.products.kind).toBe('list');
   });
 
+  test('accepts a root list schema', () => {
+    const compiled = validateStructuredExtractSchema({
+      kind: 'list',
+      selector: '.product',
+      item: {
+        kind: 'object',
+        fields: {
+          name: { kind: 'text', selector: '.name', required: true },
+        },
+      },
+    });
+
+    expect(compiled.kind).toBe('list');
+    expect(compiled.item.kind).toBe('object');
+  });
+
   test('rejects attr fields without an attr property', () => {
     expect(() =>
       validateStructuredExtractSchema({
@@ -66,6 +82,20 @@ describe('structured-extractor schema validation (unit)', () => {
         },
       }),
     ).toThrow('schema.fields.broken.attr must be a non-empty string');
+  });
+
+  test('rejects scalar root schemas with a 400 structured schema error', () => {
+    try {
+      validateStructuredExtractSchema({
+        kind: 'text',
+        selector: 'h1',
+      });
+      throw new Error('expected root schema validation to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+      expect(error.statusCode).toBe(400);
+      expect(error.message).toBe('schema.kind must be "object" or "list" at the root');
+    }
   });
 
   test('rejects unsupported selector engines and arbitrary transforms', () => {
