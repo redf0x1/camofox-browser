@@ -8,28 +8,10 @@ import type {
 	StructuredScalarKind,
 } from '../types';
 
-const { DOMSelector } = require('@asamuzakjp/dom-selector') as {
-	DOMSelector: new (
-		window: unknown,
-		document: unknown,
-	) => {
-		querySelector: (
-			selector: string,
-			root: unknown,
-			options?: { noexcept?: boolean },
-		) => unknown;
-	};
+const cssTree = require('css-tree') as {
+	parse: (selector: string, options?: { context?: string; parseCustomProperty?: boolean }) => unknown;
+	walk: (ast: unknown, callback: (node: any) => void) => void;
 };
-const { parseHTML } = require('linkedom') as {
-	parseHTML: (html: string) => {
-		window: unknown;
-		document: unknown;
-	};
-};
-const { window: selectorWindow, document: selectorDocument } = parseHTML(
-	'<html><body><a href="#"></a><video></video><div class="x"></div></body></html>',
-);
-const selectorEngine = new DOMSelector(selectorWindow, selectorDocument);
 
 type CompiledStructuredExtractScalarSchema = StructuredExtractScalarSchema & {
 	path: string;
@@ -59,24 +41,90 @@ const joinKinds = new Set<StructuredScalarKind>(['text', 'attr', 'url']);
 const scalarSchemaKeys = new Set(['kind', 'selector', 'required', 'trim', 'join', 'coerce', 'attr']);
 const objectSchemaKeys = new Set(['kind', 'selector', 'required', 'fields']);
 const listSchemaKeys = new Set(['kind', 'selector', 'required', 'item']);
-const unsupportedPseudoElements = new Set([
-	'after',
-	'backdrop',
-	'before',
-	'cue',
-	'cue-region',
-	'file-selector-button',
-	'first-letter',
-	'first-line',
-	'grammar-error',
-	'marker',
-	'part',
-	'placeholder',
-	'selection',
-	'slotted',
-	'spelling-error',
-	'target-text',
+const legacyPseudoElementNames = new Set(['before', 'after', 'first-letter', 'first-line']);
+const simplePseudoClassNames = new Set([
+	'-webkit-autofill',
+	'active',
+	'any-link',
+	'autofill',
+	'blank',
+	'buffering',
+	'checked',
+	'closed',
+	'default',
+	'defined',
+	'disabled',
+	'empty',
+	'enabled',
+	'first-child',
+	'first-of-type',
+	'focus',
+	'focus-visible',
+	'focus-within',
+	'fullscreen',
+	'future',
+	'hover',
+	'in-range',
+	'indeterminate',
+	'invalid',
+	'last-child',
+	'last-of-type',
+	'link',
+	'local-link',
+	'modal',
+	'muted',
+	'only-child',
+	'open',
+	'optional',
+	'out-of-range',
+	'past',
+	'paused',
+	'picture-in-picture',
+	'placeholder-shown',
+	'playing',
+	'popover-open',
+	'read-only',
+	'read-write',
+	'required',
+	'root',
+	'scope',
+	'seeking',
+	'stalled',
+	'target',
+	'target-within',
+	'user-invalid',
+	'user-valid',
+	'valid',
+	'visited',
+	'volume-locked',
 ]);
+const functionalPseudoClassNames = new Set([
+	'current',
+	'dir',
+	'has',
+	'heading',
+	'host',
+	'host-context',
+	'is',
+	'lang',
+	'not',
+	'nth-col',
+	'nth-last-col',
+	'state',
+	'where',
+]);
+
+function isSupportedPseudoClass(node: { name?: string; children?: unknown[] | null }): boolean {
+	const name = String(node.name || '').toLowerCase();
+	if (legacyPseudoElementNames.has(name)) return true;
+	if (node.children) {
+		return (
+			functionalPseudoClassNames.has(name) ||
+			/^nth-(?:last-)?(?:child|of-type)$/.test(name)
+		);
+	}
+	return simplePseudoClassNames.has(name);
+}
 
 export class StructuredExtractSchemaError extends Error {
 	public readonly statusCode = 400;
@@ -100,25 +148,53 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 	}
 	const normalizedSelector = selector.trim();
 
+	let ast: unknown;
 	try {
-		selectorEngine.querySelector(normalizedSelector, selectorDocument, { noexcept: false });
+		ast = cssTree.parse(normalizedSelector, { context: 'selectorList', parseCustomProperty: true });
 	} catch {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
 
-	for (const match of normalizedSelector.matchAll(/::?([a-zA-Z-]+)/g)) {
-		const token = match[1].toLowerCase();
-		const isDoubleColon = match[0].startsWith('::');
-		const isLegacyPseudoElement =
-			!isDoubleColon &&
-			(token === 'before' || token === 'after' || token === 'first-letter' || token === 'first-line');
-		if (isDoubleColon || isLegacyPseudoElement) {
-			if (unsupportedPseudoElements.has(token)) {
+	let previousNode: any = null;
+	let hasNode = false;
+
+	cssTree.walk(ast, (node) => {
+		hasNode = true;
+		if (node.type === 'PseudoElementSelector') {
+			const name = String(node.name || '').toLowerCase();
+			if (name.startsWith('-p-')) {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+			}
+			throw new StructuredExtractSchemaError(
+				`${path}.selector must target DOM elements; pseudo-elements are not supported`,
+			);
+		}
+
+		if (node.type === 'PseudoClassSelector') {
+			const name = String(node.name || '').toLowerCase();
+			if (legacyPseudoElementNames.has(name)) {
 				throw new StructuredExtractSchemaError(
 					`${path}.selector must target DOM elements; pseudo-elements are not supported`,
 				);
 			}
+			if (!isSupportedPseudoClass(node)) {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+			}
 		}
+
+		if (node.type === 'Combinator' && previousNode === null) {
+			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+		}
+
+		if (previousNode && previousNode.type === 'Combinator' && node.type === 'Combinator') {
+			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+		}
+
+		previousNode = node;
+	});
+
+	if (!hasNode || previousNode?.type === 'Combinator') {
+		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
 }
 

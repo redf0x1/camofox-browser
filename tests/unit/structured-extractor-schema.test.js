@@ -211,6 +211,49 @@ describe('structured-extractor schema validation (unit)', () => {
     expect(compiled.fields.scoped.selector).toBe(':where(.x)');
   });
 
+  test('accepts quoted attribute values that contain pseudo-element-like text', () => {
+    const compiled = validateStructuredExtractSchema({
+      kind: 'object',
+      fields: {
+        iconName: {
+          kind: 'text',
+          selector: '[data-icon="::before"]',
+        },
+        label: {
+          kind: 'text',
+          selector: '[data-label=":before"]',
+        },
+        scoped: {
+          kind: 'text',
+          selector: ':where([data-icon="::before"])',
+        },
+      },
+    });
+
+    expect(compiled.fields.iconName.selector).toBe('[data-icon="::before"]');
+    expect(compiled.fields.label.selector).toBe('[data-label=":before"]');
+    expect(compiled.fields.scoped.selector).toBe(':where([data-icon="::before"])');
+  });
+
+  test('accepts valid :has pseudo-class selectors', () => {
+    const compiled = validateStructuredExtractSchema({
+      kind: 'object',
+      fields: {
+        container: {
+          kind: 'text',
+          selector: 'div:has(.x)',
+        },
+        attributeContainer: {
+          kind: 'text',
+          selector: 'div:has([data-x])',
+        },
+      },
+    });
+
+    expect(compiled.fields.container.selector).toBe('div:has(.x)');
+    expect(compiled.fields.attributeContainer.selector).toBe('div:has([data-x])');
+  });
+
   test('rejects additional non-CSS selector syntax with structured schema errors', () => {
     const invalidSelectors = [
       'internal:role=button',
@@ -265,23 +308,25 @@ describe('structured-extractor schema validation (unit)', () => {
   });
 
   test('rejects pseudo-element selectors with an accurate structured schema error', () => {
-    try {
-      validateStructuredExtractSchema({
-        kind: 'object',
-        fields: {
-          title: {
-            kind: 'text',
-            selector: 'div::before',
+    for (const selector of ['div::before', 'div::selection', 'div::grammar-error']) {
+      try {
+        validateStructuredExtractSchema({
+          kind: 'object',
+          fields: {
+            title: {
+              kind: 'text',
+              selector,
+            },
           },
-        },
-      });
-      throw new Error('expected pseudo-element selector to fail validation');
-    } catch (error) {
-      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
-      expect(error.statusCode).toBe(400);
-      expect(error.message).toBe(
-        'schema.fields.title.selector must target DOM elements; pseudo-elements are not supported',
-      );
+        });
+        throw new Error(`expected pseudo-element selector ${selector} to fail validation`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+        expect(error.statusCode).toBe(400);
+        expect(error.message).toBe(
+          'schema.fields.title.selector must target DOM elements; pseudo-elements are not supported',
+        );
+      }
     }
   });
 
