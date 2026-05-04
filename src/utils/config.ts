@@ -197,10 +197,11 @@ type FingerprintOs = 'windows' | 'macos' | 'linux';
 
 function parseFingerprintOs(raw: string | undefined): FingerprintDefaults['os'] {
   if (raw === undefined) return undefined;
-  const parts = raw
-    .split(',')
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
+  const parts = raw.split(',').map((part) => part.trim().toLowerCase());
+  // Reject empty tokens: trailing commas, consecutive commas, etc.
+  if (parts.some((p) => !p)) {
+    throw new Error('CAMOFOX_OS must not contain empty tokens (check for trailing or consecutive commas)');
+  }
   if (!parts.length) {
     throw new Error('CAMOFOX_OS must contain at least one value');
   }
@@ -215,7 +216,12 @@ function parseFingerprintOs(raw: string | undefined): FingerprintDefaults['os'] 
 
 function parseOptionalPositiveInt(raw: string | undefined, name: string): number | undefined {
   if (raw === undefined) return undefined;
-  const parsed = Number.parseInt(raw, 10);
+  const trimmed = raw.trim();
+  // Reject anything that isn't a bare integer string (no decimals, no units, no leading signs beyond digits)
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${name} must be a positive integer (got: ${JSON.stringify(raw)})`);
+  }
+  const parsed = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`${name} must be a positive integer (got: ${JSON.stringify(raw)})`);
   }
