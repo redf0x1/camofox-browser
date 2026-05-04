@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { Command } from 'commander';
 
 import { resolveCommandUser, requireTabId } from '../utils/command-helpers';
@@ -67,7 +69,51 @@ function toSearchUrl(engine: SearchEngine, query: string): string {
 	}
 }
 
+function parseStructuredSchemaArg(input: string): unknown {
+	let raw = input;
+	if (input.startsWith('@')) {
+		try {
+			raw = readFileSync(input.slice(1), 'utf8');
+		} catch (error) {
+			throw new Error(
+				`Cannot load structured schema from file: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+	try {
+		return JSON.parse(raw) as unknown;
+	} catch (error) {
+		throw new Error(`Invalid structured schema JSON: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
 export function registerContentCommands(program: Command, context: CliContext): void {
+	program
+		.command('extract-structured')
+		.argument('<schemaOrFile>', 'JSON schema string or @path/to/schema.json')
+		.argument('[tabId]', 'tab id (defaults to active tab)')
+		.option('--user <user>', 'user id')
+		.action(
+			async (
+				schemaOrFile: string,
+				tabIdArg: string | undefined,
+				options: { user?: string },
+				command: Command,
+			) => {
+				try {
+					const userId = resolveCommandUser({ command, user: options.user });
+					const tabId = requireTabId(resolveTabId({ tabId: tabIdArg }), options);
+					const schema = parseStructuredSchemaArg(schemaOrFile);
+					const response = await context
+						.getTransport()
+						.post(`/tabs/${encodeURIComponent(tabId)}/extract-structured`, { userId, schema });
+					context.print(command, response.data);
+				} catch (error) {
+					context.handleError(error);
+				}
+			},
+		);
+
 	program
 		.command('get-text')
 		.argument('[tabId]', 'tab id (defaults to active tab)')

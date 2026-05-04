@@ -69,6 +69,7 @@
   "dependencies": {
     "camoufox-js": "^0.8.5",
     "commander": "^14.0.0",
+    "css-tree": "^3.2.1",
     "express": "^4.18.2",
     "playwright-core": "^1.58.0"
   },

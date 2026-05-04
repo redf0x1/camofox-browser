@@ -316,6 +316,64 @@ function createTestApp() {
     `);
   });
 
+  app.get('/structured-products', (_req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Structured Products</title></head>
+        <body>
+          <main id="catalog">
+            <h1>Catalog</h1>
+            <article class="product">
+              <h2 class="name">Red Mug</h2>
+              <p class="price">19.99</p>
+              <a class="product-link" href="/products/red-mug">View product</a>
+              <section class="seller">
+                <span class="seller-name">North Shop</span>
+              </section>
+              <ul>
+                <li class="badge">Hot</li>
+                <li class="badge">Ceramic</li>
+              </ul>
+            </article>
+            <article class="product">
+              <h2 class="name">Blue Plate</h2>
+              <p class="price">24.5</p>
+              <a class="product-link" href="/products/blue-plate">View product</a>
+              <section class="seller">
+                <span class="seller-name">South Shop</span>
+              </section>
+              <ul>
+                <li class="badge">New</li>
+              </ul>
+            </article>
+          </main>
+        </body>
+      </html>
+    `);
+  });
+
+  app.get('/structured-missing-price', (_req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Structured Missing Price</title></head>
+        <body>
+          <main id="catalog">
+            <h1>Catalog</h1>
+            <article class="product">
+              <h2 class="name">Red Mug</h2>
+              <p class="price">19.99</p>
+            </article>
+            <article class="product">
+              <h2 class="name">Blue Plate</h2>
+            </article>
+          </main>
+        </body>
+      </html>
+    `);
+  });
+
   // Native download fixture for download-listener tests
   app.get('/download-file', (req, res) => {
     const content = Buffer.from('camofox-test-download-content');
