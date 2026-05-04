@@ -351,6 +351,16 @@ export class ContextPool {
 					? [configuredOs]
 					: [hostOS];
 
+			const configuredScreen = CONFIG.fingerprintDefaults.screen;
+			const fingerprintScreen = configuredScreen
+				? {
+						minWidth: configuredScreen.width,
+						maxWidth: configuredScreen.width,
+						minHeight: configuredScreen.height,
+						maxHeight: configuredScreen.height,
+					}
+				: undefined;
+
 			try {
 				const persistedFingerprint = readVersionedSidecar<Fingerprint>(fpPath, {
 					currentVersion: 1,
@@ -370,7 +380,10 @@ export class ContextPool {
 			}
 
 			if (!fingerprint) {
-				fingerprint = generateFingerprint(undefined, { operatingSystems: fingerprintOperatingSystems });
+				fingerprint = generateFingerprint(undefined, {
+					operatingSystems: fingerprintOperatingSystems,
+					...(fingerprintScreen ? { screen: fingerprintScreen } : {}),
+				});
 				try {
 					writeVersionedSidecar(fpPath, 1, fingerprint);
 					log('info', 'generated new fingerprint and persisted it', { userId, fpPath });
@@ -387,16 +400,6 @@ export class ContextPool {
 				...(CONFIG.fingerprintDefaults.allowWebgl !== undefined
 					? { allow_webgl: CONFIG.fingerprintDefaults.allowWebgl }
 					: {}),
-				...(CONFIG.fingerprintDefaults.screen
-				? {
-						screen: {
-							minWidth: CONFIG.fingerprintDefaults.screen.width,
-							maxWidth: CONFIG.fingerprintDefaults.screen.width,
-							minHeight: CONFIG.fingerprintDefaults.screen.height,
-							maxHeight: CONFIG.fingerprintDefaults.screen.height,
-						},
-					}
-				: {}),
 				enable_cache: true,
 				proxy: proxy ?? undefined,
 				geoip: !!proxy,

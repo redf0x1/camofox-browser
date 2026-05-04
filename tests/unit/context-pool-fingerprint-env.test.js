@@ -63,16 +63,22 @@ test('applies fingerprint env defaults to launch options and new fingerprint gen
 
   await pool.ensureContext('user-a', 'user-a');
 
+  // Screen constraints must flow into generateFingerprint (where they take effect),
+  // not just into launchOptions (which ignores screen when a fingerprint is provided).
   expect(mockGenerateFingerprint).toHaveBeenCalledWith(undefined, {
     operatingSystems: ['windows', 'macos'],
+    screen: { minWidth: 1920, maxWidth: 1920, minHeight: 1080, maxHeight: 1080 },
   });
   expect(mockLaunchOptions).toHaveBeenCalledWith(
     expect.objectContaining({
       os: ['windows', 'macos'],
       allow_webgl: true,
       humanize: false,
-      screen: { minWidth: 1920, maxWidth: 1920, minHeight: 1080, maxHeight: 1080 },
     }),
+  );
+  // screen must NOT be passed to launchOptions — it is a no-op there when fingerprint is set.
+  expect(mockLaunchOptions).toHaveBeenCalledWith(
+    expect.not.objectContaining({ screen: expect.anything() }),
   );
 });
 
