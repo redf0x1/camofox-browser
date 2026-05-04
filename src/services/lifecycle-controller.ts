@@ -62,6 +62,9 @@ export class LifecycleController {
     if (this.hasLiveActivity()) {
       this.lastActivityMs = this.now();
       this.cleanupFinishedMs = null;
+    } else if (this.liveState.liveSessions > 0) {
+      // Empty sessions don't reset cleanup timer but DO disarm pending exit
+      this.cleanupFinishedMs = null;
     }
   }
 
