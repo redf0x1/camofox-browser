@@ -197,6 +197,48 @@ export interface ExtractResourcesResult {
   metadata: ExtractionMetadata;
 }
 
+export type StructuredScalarKind = 'text' | 'html' | 'attr' | 'url' | 'number';
+
+export interface StructuredExtractScalarSchema {
+  kind: StructuredScalarKind;
+  selector?: string;
+  required?: boolean;
+  trim?: boolean;
+  join?: string;
+  coerce?: 'number' | 'url';
+  attr?: string;
+}
+
+export interface StructuredExtractObjectSchema {
+  kind: 'object';
+  selector?: string;
+  required?: boolean;
+  fields: Record<string, StructuredExtractSchema>;
+}
+
+export interface StructuredExtractListSchema {
+  kind: 'list';
+  selector?: string;
+  required?: boolean;
+  item: StructuredExtractSchema;
+}
+
+export type StructuredExtractSchema =
+  | StructuredExtractScalarSchema
+  | StructuredExtractObjectSchema
+  | StructuredExtractListSchema;
+
+export interface StructuredExtractMetadata {
+  extractionTimeMs: number;
+  matchedRoots?: number;
+}
+
+export interface StructuredExtractResult {
+  ok: true;
+  data: unknown;
+  metadata: StructuredExtractMetadata;
+}
+
 export interface BatchDownloadParams {
   userId: string;
   selector?: string;
