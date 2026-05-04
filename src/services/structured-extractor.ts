@@ -61,10 +61,58 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 	if (
 		normalizedSelector.startsWith('//') ||
 		normalizedSelector.startsWith('.//') ||
-		/^[a-z][a-z-]*=/i.test(normalizedSelector)
+		/^[a-z][a-z-]*=/i.test(normalizedSelector) ||
+		normalizedSelector.includes('::-p-') ||
+		!isBalancedCssSelector(normalizedSelector)
 	) {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
+}
+
+function isBalancedCssSelector(selector: string): boolean {
+	const stack: string[] = [];
+	let activeQuote: '"' | "'" | null = null;
+	let escaped = false;
+
+	for (const char of selector) {
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+
+		if (char === '\\') {
+			escaped = true;
+			continue;
+		}
+
+		if (activeQuote) {
+			if (char === activeQuote) {
+				activeQuote = null;
+			}
+			continue;
+		}
+
+		if (char === '"' || char === "'") {
+			activeQuote = char;
+			continue;
+		}
+
+		if (char === '[' || char === '(') {
+			stack.push(char);
+			continue;
+		}
+
+		if (char === ']') {
+			if (stack.pop() !== '[') return false;
+			continue;
+		}
+
+		if (char === ')') {
+			if (stack.pop() !== '(') return false;
+		}
+	}
+
+	return !activeQuote && stack.length === 0;
 }
 
 function assertNoTransform(path: string, schema: Record<string, unknown>): void {
@@ -158,10 +206,6 @@ function validateStructuredExtractNode(
 ): CompiledStructuredExtractSchema {
 	assertRecord(path, schema);
 
-	if (path === 'schema' && schema.kind !== 'object' && schema.kind !== 'list') {
-		throw new StructuredExtractSchemaError('schema.kind must be "object" or "list" at the root');
-	}
-
 	if (schema.kind === 'object') {
 		const schemaRecord = schema as unknown as Record<string, unknown>;
 		assertCssSelector(path, schema.selector);
@@ -205,9 +249,11 @@ function validateStructuredExtractNode(
 
 export function validateStructuredExtractSchema(
 	schema: StructuredExtractRootSchema,
-	path = 'schema',
 ): CompiledStructuredExtractRootSchema {
-	return validateStructuredExtractNode(schema, path) as CompiledStructuredExtractRootSchema;
+	if (schema.kind !== 'object' && schema.kind !== 'list') {
+		throw new StructuredExtractSchemaError('schema.kind must be "object" or "list" at the root');
+	}
+	return validateStructuredExtractNode(schema, 'schema') as CompiledStructuredExtractRootSchema;
 }
 
 export async function extractStructuredData(): Promise<StructuredExtractResult> {

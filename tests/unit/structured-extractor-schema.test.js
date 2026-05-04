@@ -98,6 +98,23 @@ describe('structured-extractor schema validation (unit)', () => {
     }
   });
 
+  test('rejects scalar root schemas even when a custom path is passed', () => {
+    try {
+      validateStructuredExtractSchema(
+        {
+          kind: 'text',
+          selector: 'h1',
+        },
+        'root',
+      );
+      throw new Error('expected root schema validation to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+      expect(error.statusCode).toBe(400);
+      expect(error.message).toBe('schema.kind must be "object" or "list" at the root');
+    }
+  });
+
   test('rejects unsupported selector engines and arbitrary transforms', () => {
     expect(() =>
       validateStructuredExtractSchema({
@@ -107,6 +124,34 @@ describe('structured-extractor schema validation (unit)', () => {
             kind: 'text',
             selector: '//h1',
             transform: 'custom-js',
+          },
+        },
+      }),
+    ).toThrow('schema.fields.title.selector must be a CSS selector');
+  });
+
+  test('rejects malformed CSS selectors', () => {
+    expect(() =>
+      validateStructuredExtractSchema({
+        kind: 'object',
+        fields: {
+          title: {
+            kind: 'text',
+            selector: 'a[',
+          },
+        },
+      }),
+    ).toThrow('schema.fields.title.selector must be a CSS selector');
+  });
+
+  test('rejects Playwright-only selector syntax', () => {
+    expect(() =>
+      validateStructuredExtractSchema({
+        kind: 'object',
+        fields: {
+          title: {
+            kind: 'text',
+            selector: '::-p-text(Hello)',
           },
         },
       }),
