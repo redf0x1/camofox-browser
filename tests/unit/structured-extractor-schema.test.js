@@ -184,7 +184,6 @@ describe('structured-extractor schema validation (unit)', () => {
       ':has-text("Buy")',
       'h1 >> text=Hello',
       'div>',
-      'div::before',
     ];
 
     for (const selector of invalidSelectors) {
@@ -204,6 +203,27 @@ describe('structured-extractor schema validation (unit)', () => {
         expect(error.statusCode).toBe(400);
         expect(error.message).toBe('schema.fields.title.selector must be a CSS selector');
       }
+    }
+  });
+
+  test('rejects pseudo-element selectors with an accurate structured schema error', () => {
+    try {
+      validateStructuredExtractSchema({
+        kind: 'object',
+        fields: {
+          title: {
+            kind: 'text',
+            selector: 'div::before',
+          },
+        },
+      });
+      throw new Error('expected pseudo-element selector to fail validation');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+      expect(error.statusCode).toBe(400);
+      expect(error.message).toBe(
+        'schema.fields.title.selector must target DOM elements; pseudo-elements are not supported',
+      );
     }
   });
 

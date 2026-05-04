@@ -66,6 +66,11 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a non-empty string`);
 	}
 	const normalizedSelector = selector.trim();
+	if (/::[a-z-]+/i.test(normalizedSelector) && !normalizedSelector.includes('::-p-')) {
+		throw new StructuredExtractSchemaError(
+			`${path}.selector must target DOM elements; pseudo-elements are not supported`,
+		);
+	}
 	if (
 		normalizedSelector.startsWith('//') ||
 		normalizedSelector.startsWith('.//') ||
