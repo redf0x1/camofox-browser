@@ -256,6 +256,10 @@ describe('structured-extractor schema validation (unit)', () => {
 
   test('rejects additional non-CSS selector syntax with structured schema errors', () => {
     const invalidSelectors = [
+      '>div',
+      '> .foo',
+      '+ div',
+      '~ span',
       'internal:role=button',
       ':has-text("Buy")',
       'h1 >> text=Hello',

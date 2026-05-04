@@ -177,11 +177,34 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
 
-	let previousNode: any = null;
-	let hasNode = false;
+	cssTree.walk(ast, (node) => {
+		if (node.type !== 'Selector') {
+			return;
+		}
+
+		let previousNode: any = null;
+		let hasNode = false;
+
+		node.children.forEach((childNode: any) => {
+			hasNode = true;
+
+			if (childNode.type === 'Combinator' && previousNode === null) {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+			}
+
+			if (previousNode && previousNode.type === 'Combinator' && childNode.type === 'Combinator') {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+			}
+
+			previousNode = childNode;
+		});
+
+		if (!hasNode || previousNode?.type === 'Combinator') {
+			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+		}
+	});
 
 	cssTree.walk(ast, (node) => {
-		hasNode = true;
 		if (node.type === 'PseudoElementSelector') {
 			const name = String(node.name || '').toLowerCase();
 			if (name.startsWith('-p-')) {
@@ -203,21 +226,7 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 			}
 		}
-
-		if (node.type === 'Combinator' && previousNode === null) {
-			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
-		}
-
-		if (previousNode && previousNode.type === 'Combinator' && node.type === 'Combinator') {
-			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
-		}
-
-		previousNode = node;
 	});
-
-	if (!hasNode || previousNode?.type === 'Combinator') {
-		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
-	}
 }
 
 function assertNoTransform(path: string, schema: Record<string, unknown>): void {
