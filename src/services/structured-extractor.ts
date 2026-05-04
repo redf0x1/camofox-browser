@@ -36,6 +36,14 @@ const joinKinds = new Set<StructuredScalarKind>(['text', 'attr', 'url']);
 const scalarSchemaKeys = new Set(['kind', 'selector', 'required', 'trim', 'join', 'coerce', 'attr']);
 const objectSchemaKeys = new Set(['kind', 'selector', 'required', 'fields']);
 const listSchemaKeys = new Set(['kind', 'selector', 'required', 'item']);
+const disallowedSelectorPatterns = [
+	/^internal:/i,
+	/>>/,
+	/:has-text\(/i,
+	/:(?:text|text-is|text-matches|nth-match|visible|near|right-of|left-of|above|below)\b/i,
+	/::[a-z-]+/i,
+	/[>+~]\s*$/,
+];
 
 export class StructuredExtractSchemaError extends Error {
 	public readonly statusCode = 400;
@@ -63,6 +71,7 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 		normalizedSelector.startsWith('.//') ||
 		/^[a-z][a-z-]*=/i.test(normalizedSelector) ||
 		normalizedSelector.includes('::-p-') ||
+		disallowedSelectorPatterns.some((pattern) => pattern.test(normalizedSelector)) ||
 		!isBalancedCssSelector(normalizedSelector)
 	) {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);

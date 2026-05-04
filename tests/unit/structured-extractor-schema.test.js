@@ -178,6 +178,35 @@ describe('structured-extractor schema validation (unit)', () => {
     ).toThrow('schema.fields.title.selector must be a CSS selector');
   });
 
+  test('rejects additional non-CSS selector syntax with structured schema errors', () => {
+    const invalidSelectors = [
+      'internal:role=button',
+      ':has-text("Buy")',
+      'h1 >> text=Hello',
+      'div>',
+      'div::before',
+    ];
+
+    for (const selector of invalidSelectors) {
+      try {
+        validateStructuredExtractSchema({
+          kind: 'object',
+          fields: {
+            title: {
+              kind: 'text',
+              selector,
+            },
+          },
+        });
+        throw new Error(`expected selector ${selector} to fail validation`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+        expect(error.statusCode).toBe(400);
+        expect(error.message).toBe('schema.fields.title.selector must be a CSS selector');
+      }
+    }
+  });
+
   test('rejects transform on otherwise valid schemas', () => {
     expect(() =>
       validateStructuredExtractSchema({
