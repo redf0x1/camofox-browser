@@ -1,3 +1,4 @@
+import type { Locator, Page } from 'playwright-core';
 import type {
 	StructuredExtractListSchema,
 	StructuredExtractObjectSchema,
@@ -132,6 +133,27 @@ export class StructuredExtractSchemaError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = 'StructuredExtractSchemaError';
+	}
+}
+
+export interface StructuredScopeAdapter {
+	queryAll(selector: string): Promise<StructuredScopeAdapter[]>;
+	text(): Promise<string | null>;
+	html(): Promise<string | null>;
+	attr(name: string): Promise<string | null>;
+	getBaseUrl(): string;
+}
+
+export class StructuredExtractRuntimeError extends Error {
+	public readonly statusCode = 422;
+	public readonly fieldPath: string;
+	public readonly reason: string;
+
+	constructor(fieldPath: string, reason: string) {
+		super(reason === 'required' ? `Missing required field at ${fieldPath}` : `Structured extraction failed at ${fieldPath}`);
+		this.name = 'StructuredExtractRuntimeError';
+		this.fieldPath = fieldPath;
+		this.reason = reason;
 	}
 }
 
@@ -343,6 +365,227 @@ export function validateStructuredExtractSchema(
 	return validateStructuredExtractNode(schema, 'schema') as CompiledStructuredExtractRootSchema;
 }
 
-export async function extractStructuredData(): Promise<StructuredExtractResult> {
-	throw new Error('Not implemented yet');
+export function buildFieldPath(path: string, key: string | number): string {
+	if (typeof key === 'number') {
+		return `${path}[${key}]`;
+	}
+	return `${path}.${key}`;
+}
+
+export function createLocatorScope(locator: Locator, baseUrl: string): StructuredScopeAdapter {
+	return {
+		async queryAll(selector: string): Promise<StructuredScopeAdapter[]> {
+			const matches = locator.locator(selector);
+			const count = await matches.count();
+			const scopes: StructuredScopeAdapter[] = [];
+			for (let index = 0; index < count; index += 1) {
+				scopes.push(createLocatorScope(matches.nth(index), baseUrl));
+			}
+			return scopes;
+		},
+		async text(): Promise<string | null> {
+			return locator.textContent();
+		},
+		async html(): Promise<string | null> {
+			return locator.evaluate((node) => (node as { innerHTML?: string }).innerHTML ?? null);
+		},
+		async attr(name: string): Promise<string | null> {
+			return locator.getAttribute(name);
+		},
+		getBaseUrl(): string {
+			return baseUrl;
+		},
+	};
+}
+
+function normalizeStringValue(value: string | null, trim?: boolean): string | null {
+	if (value === null || value === undefined) return null;
+	const normalized = trim ? value.trim() : value;
+	return normalized.length > 0 ? normalized : null;
+}
+
+function coerceNumberValue(value: string | null): number | null {
+	if (value === null) return null;
+	const normalized = value.replace(/,/g, '');
+	const coerced = Number(normalized);
+	return Number.isFinite(coerced) ? coerced : null;
+}
+
+function coerceUrlValue(value: string | null, baseUrl: string): string | null {
+	if (value === null) return null;
+	try {
+		return new URL(value, baseUrl).toString();
+	} catch {
+		return null;
+	}
+}
+
+async function getSelectedScopes(
+	scope: StructuredScopeAdapter,
+	selector?: string,
+): Promise<StructuredScopeAdapter[]> {
+	if (!selector) return [scope];
+	return scope.queryAll(selector);
+}
+
+function throwRequiredRuntimeError(fieldPath: string): never {
+	throw new StructuredExtractRuntimeError(fieldPath, 'required');
+}
+
+async function extractRawScalarValue(
+	scope: StructuredScopeAdapter,
+	schema: CompiledStructuredExtractScalarSchema,
+): Promise<string | null> {
+	let rawValue: string | null;
+
+	if (schema.kind === 'html') {
+		rawValue = normalizeStringValue(await scope.html(), schema.trim);
+	} else if (schema.kind === 'attr' || schema.kind === 'url') {
+		rawValue = normalizeStringValue(await scope.attr(schema.attr || 'href'), schema.trim);
+	} else {
+		rawValue = normalizeStringValue(await scope.text(), schema.trim);
+	}
+
+	return rawValue;
+}
+
+function coerceScalarValue(
+	rawValue: string | null,
+	schema: CompiledStructuredExtractScalarSchema,
+	baseUrl: string,
+): string | number | null {
+	if (schema.kind === 'number' || schema.coerce === 'number') {
+		return coerceNumberValue(rawValue);
+	}
+	if (schema.kind === 'url' || schema.coerce === 'url') {
+		return coerceUrlValue(rawValue, baseUrl);
+	}
+	return rawValue;
+}
+
+async function extractScalarFromScope(
+	scope: StructuredScopeAdapter,
+	schema: CompiledStructuredExtractScalarSchema,
+	fieldPath: string,
+): Promise<string | number | null> {
+	const matches = await getSelectedScopes(scope, schema.selector);
+	if (matches.length === 0) {
+		if (schema.required) {
+			throwRequiredRuntimeError(fieldPath);
+		}
+		return null;
+	}
+
+	if (schema.join !== undefined) {
+		const values: string[] = [];
+		for (const match of matches) {
+			const value = await extractRawScalarValue(match, schema);
+			if (value !== null) {
+				values.push(value);
+			}
+		}
+		if (values.length === 0) {
+			if (schema.required) {
+				throwRequiredRuntimeError(fieldPath);
+			}
+			return null;
+		}
+		return coerceScalarValue(values.join(schema.join), schema, scope.getBaseUrl());
+	}
+
+	const value = coerceScalarValue(await extractRawScalarValue(matches[0], schema), schema, scope.getBaseUrl());
+	if (value === null && schema.required) {
+		throwRequiredRuntimeError(fieldPath);
+	}
+	return value;
+}
+
+async function extractCompiledFromScope(
+	scope: StructuredScopeAdapter,
+	schema: CompiledStructuredExtractSchema,
+	fieldPath: string,
+): Promise<unknown> {
+	if (schema.kind === 'object') {
+		const matches = await getSelectedScopes(scope, schema.selector);
+		if (matches.length === 0) {
+			if (schema.required) {
+				throwRequiredRuntimeError(fieldPath);
+			}
+			return null;
+		}
+
+		const objectScope = matches[0];
+		const output: Record<string, unknown> = {};
+		for (const [key, childSchema] of Object.entries(schema.fields)) {
+			output[key] = await extractCompiledFromScope(objectScope, childSchema, buildFieldPath(fieldPath, key));
+		}
+		return output;
+	}
+
+	if (schema.kind === 'list') {
+		const matches = await getSelectedScopes(scope, schema.selector);
+		if (matches.length === 0) {
+			if (schema.required) {
+				throwRequiredRuntimeError(fieldPath);
+			}
+			return [];
+		}
+
+		const values = [];
+		for (let index = 0; index < matches.length; index += 1) {
+			values.push(
+				await extractCompiledFromScope(matches[index], schema.item, buildFieldPath(fieldPath, index)),
+			);
+		}
+		return values;
+	}
+
+	return extractScalarFromScope(scope, schema, fieldPath);
+}
+
+async function countRootMatches(
+	scope: StructuredScopeAdapter,
+	schema: CompiledStructuredExtractRootSchema,
+): Promise<number> {
+	if (!schema.selector) {
+		return 1;
+	}
+	const matches = await scope.queryAll(schema.selector);
+	return matches.length;
+}
+
+async function extractCompiledRootFromScope(
+	scope: StructuredScopeAdapter,
+	schema: CompiledStructuredExtractRootSchema,
+	path = 'data',
+): Promise<unknown> {
+	return extractCompiledFromScope(scope, schema, path);
+}
+
+export async function extractStructuredFromScope(
+	scope: StructuredScopeAdapter,
+	schema: StructuredExtractRootSchema,
+	path = 'data',
+): Promise<unknown> {
+	return extractCompiledRootFromScope(scope, validateStructuredExtractSchema(schema), path);
+}
+
+export async function extractStructuredData(
+	page: Page,
+	schema: StructuredExtractRootSchema,
+): Promise<StructuredExtractResult> {
+	const start = Date.now();
+	const compiledSchema = validateStructuredExtractSchema(schema);
+	const rootScope = createLocatorScope(page.locator('html'), page.url());
+	const matchedRoots = await countRootMatches(rootScope, compiledSchema);
+	const data = await extractCompiledRootFromScope(rootScope, compiledSchema, 'data');
+
+	return {
+		ok: true,
+		data,
+		metadata: {
+			extractionTimeMs: Date.now() - start,
+			matchedRoots,
+		},
+	};
 }
