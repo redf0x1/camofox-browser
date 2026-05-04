@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Added
+- **Idle lifecycle policy** — two-stage cleanup and daemon exit for graceful resource management
+  - `CAMOFOX_IDLE_TIMEOUT_MS` controls Stage 1 idle cleanup threshold (default: 30 minutes)
+  - `CAMOFOX_IDLE_EXIT_TIMEOUT_MS` controls Stage 2 daemon exit quiet window (default: matches Stage 1)
+  - Stage 1 cleanup runs before Stage 2 daemon exit
+  - New interactive activity (tab creation, navigation, interaction) cancels pending cleanup and exit timers
+  - Empty sessions disarm pending exit without blocking cleanup
+  - Launching contexts and staged session creation delay cleanup
 - **Session-level proxy and geo overrides** — `POST /tabs` and CLI `camofox open` now accept `proxyProfile` (named profile from `CAMOFOX_PROXY_PROFILES_FILE`) or raw `proxy` fields (`host`, `port`, `username`, `password`) for session-level proxy configuration
 - **Hybrid geo modes** — `geoMode=explicit-wins` (default, explicit geo fields remain authoritative) and `geoMode=proxy-locked` (requires proxy-derived geo and rejects conflicting explicit geo)
 - **Session-scoped proxy/geo identity** — proxy and geo configuration now scoped by `userId + sessionKey` instead of `userId` alone; same user may run parallel sessions with different proxy/geo profiles using different session keys
