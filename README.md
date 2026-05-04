@@ -20,6 +20,7 @@
 - [Usage with AI Agents](#usage-with-ai-agents)
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
+- [Structured Extract](#structured-extract)
 - [Search Macros](#search-macros)
 - [Geo Presets](#geo-presets)
 - [Environment Variables](#environment-variables)
@@ -59,6 +60,7 @@
 - **YouTube Transcript Extraction** — yt-dlp + browser fallback (service-level; no public API route currently exposed)
 - **Snapshot Pagination** — offset-based windowing for large page snapshots
 - **Image Listing Route** — image-only extraction over the shared resource extractor with selector, extension, lazy-load, and blob-resolution controls
+- **Structured Extract** — deterministic schema-driven JSON extraction across core API, CLI, and OpenClaw without arbitrary JavaScript
 - **Browser Health Monitoring** — health probe with recovery/degraded state tracking
 - 🖥️ **CLI Mode** — 50+ commands for terminal-based browser automation
 - 🔐 **Auth Vault** — AES-256-GCM encrypted credential storage (LLM-safe)
@@ -212,6 +214,7 @@ camofox get-url                        # Get current page URL
 camofox get-text                       # Get page text content
 camofox get-links                      # Get all links on page
 camofox get-tabs                       # List open tabs
+camofox extract-structured @schema.json # Extract deterministic JSON from a schema
 
 # Interaction
 camofox click <ref>                    # Click element by ref
@@ -514,6 +517,7 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 | GET | `/tabs/:tabId/console` | Get console messages | Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/tabs/:tabId/errors` | Get uncaught JS errors | Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | POST | `/tabs/:tabId/console/clear` | Clear console + errors | Body or Query: `userId` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
+| POST | `/tabs/:tabId/extract-structured` | Extract deterministic JSON from a structured schema | Body: `userId` + `schema` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 
 ### Toggle Display Mode
 ```bash
@@ -587,7 +591,70 @@ OpenClaw-compatible aliases (used by the OpenClaw plugin).
 | POST | `/stop` | Stop browser engine | None | `x-admin-key: $CAMOFOX_ADMIN_KEY` |
 | POST | `/navigate` | Navigate (OpenClaw request shape: `targetId` in body) | Body: `userId` + `targetId` + `url` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 | GET | `/snapshot?userId=...&targetId=...` | Snapshot (OpenClaw response shape) | Query: `userId` + `targetId` | None |
-| POST | `/act` | Combined actions (`click`, `type`, `press`, `scroll`, `scrollIntoView`, `hover`, `wait`, `close`) | Body: `userId` + `targetId` + `kind` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
+| POST | `/act` | Combined actions (`click`, `type`, `press`, `scroll`, `scrollIntoView`, `hover`, `wait`, `close`, `extractStructured`) | Body: `userId` + `targetId` + `kind` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
+
+### Structured Extract
+
+Structured extract returns deterministic JSON from a DOM schema without arbitrary JavaScript. Use it when you want stable data contracts instead of ad-hoc `evaluate()` calls.
+
+Core API:
+
+```bash
+curl -X POST "$CAMOFOX_URL/tabs/$TAB_ID/extract-structured" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "userId": "agent1",
+    "schema": {
+      "kind": "object",
+      "fields": {
+        "title": { "kind": "text", "selector": "h1", "required": true, "trim": true },
+        "products": {
+          "kind": "list",
+          "selector": ".product",
+          "item": {
+            "kind": "object",
+            "fields": {
+              "name": { "kind": "text", "selector": ".name", "required": true, "trim": true },
+              "href": { "kind": "url", "selector": "a.product-link", "attr": "href", "required": true }
+            }
+          }
+        }
+      }
+    }
+  }'
+```
+
+CLI:
+
+```bash
+camofox extract-structured @schema.json <tabId> --user <userId> --format json
+```
+
+OpenClaw:
+
+```bash
+curl -X POST "$CAMOFOX_URL/act" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "kind": "extractStructured",
+    "targetId": "tab-123",
+    "userId": "agent1",
+    "schema": {
+      "kind": "object",
+      "fields": {
+        "title": { "kind": "text", "selector": "h1", "required": true }
+      }
+    }
+  }'
+```
+
+Notes:
+
+- invalid schemas fail with HTTP 400
+- required runtime misses fail the whole request with HTTP 422 and `fieldPath`
+- optional scalar/object/list nodes normalize to `null` / `null` / `[]`
+- selectors must be CSS; no XPath, arbitrary JavaScript, or AI extraction
+- raw resource extraction and structured extraction stay separate on purpose
 
 ## Search Macros
 

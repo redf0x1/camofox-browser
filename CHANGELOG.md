@@ -21,6 +21,10 @@
 - **Named proxy profiles** — `CAMOFOX_PROXY_PROFILES_FILE` environment variable points to JSON file defining reusable proxy profiles
 - **CLI proxy/geo flags** — `camofox open` supports `--proxy-profile`, `--proxy-host`, `--proxy-port`, `--proxy-username`, `--proxy-password`, and `--geo-mode` for session-level overrides
 - **OpenClaw proxy/geo support** — `/tabs/open` endpoint accepts same `proxyProfile`, `proxy`, and `geoMode` fields as core `/tabs` endpoint
+- **Structured extract** — deterministic schema-driven JSON extraction across core API, CLI, and OpenClaw
+  - validates schema shape before extraction starts
+  - fails the whole request for required-field runtime misses with stable `fieldPath`
+  - keeps raw resource extraction separate from structured extraction semantics
 
 ### Changed
 - **Session reuse and cleanup** now operate on `userId + sessionKey` scope for proxy/geo identity; conflicting proxy/geo requests for existing session profiles are rejected
@@ -34,6 +38,7 @@
 ### Tests
 - Added E2E coverage for session-level proxy/geo overrides (`tests/e2e/proxy-geo-overrides.test.js`) and OpenClaw proxy/geo support (`tests/e2e/proxy-geo-openclaw.test.js`).
 - Added unit coverage for context pool profileKey eviction (`tests/unit/context-pool-proxy-geo.test.js`).
+- Added structured extraction coverage for the core route, CLI adapter, and OpenClaw `/act` contract, including 400 schema and 422 runtime error paths.
 
 ## [2.3.0] - 2026-05-03
 
