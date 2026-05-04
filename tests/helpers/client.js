@@ -168,6 +168,13 @@ class BrowserClient {
 
     return this.request('GET', `/tabs/${tabId}/images?${params}`);
   }
+
+  async extractStructured(tabId, schema) {
+    return this.request('POST', `/tabs/${tabId}/extract-structured`, {
+      userId: this.userId,
+      schema,
+    });
+  }
   
   async getStats(tabId) {
     return this.request('GET', `/tabs/${tabId}/stats?userId=${this.userId}`);

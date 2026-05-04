@@ -72,6 +72,11 @@ import {
 	markDownloadsStaged,
 } from '../services/download';
 import { extractImages, extractResources, resolveBlob } from '../services/resource-extractor';
+import {
+	StructuredExtractRuntimeError,
+	StructuredExtractSchemaError,
+	extractStructuredData,
+} from '../services/structured-extractor';
 import { batchDownload } from '../services/batch-downloader';
 import {
 	startTracing,
@@ -84,7 +89,7 @@ import {
 	deleteTraceArtifact,
 } from '../services/tracing';
 
-import type { CookieInput, ContextOverrides, TabState } from '../types';
+import type { CookieInput, ContextOverrides, StructuredExtractRootSchema, TabState } from '../types';
 
 const CONFIG = loadConfig();
 const PKG_VERSION = (() => {
@@ -129,6 +134,13 @@ function getRouteErrorStatus(err: unknown): number {
 	}
 	if (typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number') {
 		return err.status;
+	}
+	if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ETIMEDOUT') {
+		return 504;
+	}
+	const message = err instanceof Error ? err.message : String(err);
+	if (message.includes('User concurrency limit reached')) {
+		return 429;
 	}
 	return 500;
 }
@@ -1445,6 +1457,51 @@ router.post('/tabs/:tabId/extract-resources', async (req, res) => {
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'extract resources failed', { error: message });
 		res.status(500).json({ ok: false, error: safeError(err) });
+	}
+});
+
+router.post('/tabs/:tabId/extract-structured', async (req, res) => {
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const { tabId } = req.params as { tabId: string };
+		const { userId, schema } = req.body as { userId?: unknown; schema?: unknown };
+		if (!userId || typeof userId !== 'string') {
+			return res.status(400).json({ ok: false, error: 'userId required' });
+		}
+		if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+			return res.status(400).json({ ok: false, error: 'schema must be an object' });
+		}
+		const found = findTabById(tabId, userId);
+		if (!found) return res.status(404).json({ ok: false, error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+
+		const result = await withUserLimit(String(userId), CONFIG.maxConcurrentPerUser, () =>
+			withTimeout(
+				withTabLock(tabId, async () => extractStructuredData(tabState.page, schema as StructuredExtractRootSchema)),
+				CONFIG.handlerTimeoutMs,
+				'extract-structured',
+			),
+		);
+		return res.json(result);
+	} catch (err) {
+		if (err instanceof StructuredExtractSchemaError) {
+			return res.status(err.statusCode).json({ ok: false, error: err.message });
+		}
+		if (err instanceof StructuredExtractRuntimeError) {
+			return res.status(err.statusCode).json({
+				ok: false,
+				error: 'Structured extraction failed',
+				fieldPath: err.fieldPath,
+				reason: err.reason,
+			});
+		}
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'structured extract failed', { error: message });
+		return res.status(getRouteErrorStatus(err)).json({ ok: false, error: safeError(err) });
 	}
 });
 
