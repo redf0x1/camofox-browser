@@ -6,7 +6,8 @@
 - **Server-wide fingerprint env controls** — deployments can now configure `CAMOFOX_OS`, `CAMOFOX_ALLOW_WEBGL`, `CAMOFOX_SCREEN_WIDTH`, `CAMOFOX_SCREEN_HEIGHT`, and `CAMOFOX_HUMANIZE` without source edits
   - malformed values fail fast at startup
   - incomplete screen width/height pairs are ignored safely
-  - existing persisted fingerprints are preserved until the operator resets them intentionally
+  - `CAMOFOX_OS` and `CAMOFOX_SCREEN_*` are generation-time controls; existing sidecars are preserved until the operator resets them intentionally
+  - `CAMOFOX_ALLOW_WEBGL` and `CAMOFOX_HUMANIZE` are launch-time overrides that apply on every launch even when a sidecar is reused
 - **Idle lifecycle policy** — two-stage cleanup and daemon exit for graceful resource management
   - `CAMOFOX_IDLE_TIMEOUT_MS` controls Stage 1 idle cleanup threshold (default: 30 minutes)
   - `CAMOFOX_IDLE_EXIT_TIMEOUT_MS` controls Stage 2 daemon exit quiet window (default: matches Stage 1)

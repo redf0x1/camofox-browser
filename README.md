@@ -802,7 +802,7 @@ Then use profiles by name in API requests or CLI commands.
 | `CAMOFOX_SCREEN_HEIGHT` | (unset) | Optional screen height override; applied only with `CAMOFOX_SCREEN_WIDTH` |
 | `CAMOFOX_HUMANIZE` | (unset) | Optional server-wide humanization override |
 
-> Existing persisted fingerprint sidecars are not rotated automatically. New env defaults affect newly generated fingerprints; reset the profile or delete `fingerprint.json` if you want an existing profile to regenerate under the new OS defaults.
+> `CAMOFOX_OS` and `CAMOFOX_SCREEN_*` are **generation-time** controls: they affect only newly generated fingerprints and have no effect while an existing `fingerprint.json` sidecar is in use. Reset the profile or delete `fingerprint.json` to force regeneration under the new defaults. `CAMOFOX_ALLOW_WEBGL` and `CAMOFOX_HUMANIZE` are **launch-time** overrides and apply on every browser launch regardless of whether a sidecar is reused.
 
 ### Idle Lifecycle Policy
 
