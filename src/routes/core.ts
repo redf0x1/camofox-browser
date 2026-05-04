@@ -11,6 +11,7 @@ import { checkRateLimit } from '../middleware/rate-limit';
 import { loadConfig } from '../utils/config';
 import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
 import { contextPool, getDisplayForUser } from '../services/context-pool';
+import { lifecycleController } from '../services/lifecycle-controller';
 import { startVnc, stopVnc } from '../services/vnc';
 import {
 	MAX_TABS_PER_SESSION,
@@ -332,6 +333,9 @@ router.post(
 				return res.status(403).json({ error: 'Forbidden' });
 			}
 
+			// Record activity at START to prevent idle cleanup race during tab creation
+			lifecycleController.recordInteractiveActivity();
+
 			const { userId, sessionKey, listItemId, url, preset, locale, timezoneId, geolocation, viewport } = req.body;
 			const { proxy, proxyProfile, geoMode } = req.body as {
 				proxy?: unknown;
@@ -502,6 +506,7 @@ router.post(
 				sessionKey: resolvedSessionKey,
 				url: pageUrl,
 			});
+			lifecycleController.recordInteractiveActivity();
 			return res.json({ tabId, url: pageUrl });
 		} catch (err) {
 			if (isFirstCreator && createUserId) {
@@ -595,6 +600,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 
 		if (result.status !== 200) return res.status(result.status).json(result.body);
 
+		lifecycleController.recordInteractiveActivity();
 		log('info', 'navigated', { reqId: req.reqId, tabId, url: result.body.url });
 		return res.json(result.body);
 	} catch (err) {
@@ -651,6 +657,7 @@ router.post('/tabs/:tabId/wait', async (req: Request<{ tabId: string }, unknown,
 
 		const { tabState } = found;
 		const ready = await waitForPageReady(tabState.page, { timeout, waitForNetwork });
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true, ready });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -687,6 +694,7 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 			}));
 		}
 		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });
+		lifecycleController.recordInteractiveActivity();
 		return res.json(responseObj);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -711,6 +719,7 @@ router.post('/tabs/:tabId/type', async (req: Request<{ tabId: string }, unknown,
 		tabState.toolCalls++;
 		const textValue = String(text ?? '');
 		const result = await withTimeout(typeTab(tabId, tabState, { ref, selector, text: textValue }), calculateTypeTimeoutMs(textValue), 'type');
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -733,6 +742,7 @@ router.post('/tabs/:tabId/press', async (req: Request<{ tabId: string }, unknown
 		const { tabState } = found;
 		tabState.toolCalls++;
 		await withTimeout(pressTab(tabId, tabState, String(key ?? '')), CONFIG.handlerTimeoutMs, 'press');
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -754,6 +764,7 @@ router.post('/tabs/:tabId/scroll', async (req: Request<{ tabId: string }, unknow
 		const { tabState } = found;
 		tabState.toolCalls++;
 		const result = await withTimeout(scrollTab(tabState, { direction, amount }), CONFIG.handlerTimeoutMs, 'scroll');
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -793,6 +804,7 @@ router.post(
 			tabState.toolCalls++;
 
 			const result = await scrollElementTab(tabId, tabState, { selector, ref, deltaX, deltaY, scrollTo });
+			lifecycleController.recordInteractiveActivity();
 			return res.json(result);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -827,6 +839,7 @@ router.post(
 			tabState.toolCalls++;
 
 			const result = await evaluateTab(tabId, tabState, { expression, timeout });
+			lifecycleController.recordInteractiveActivity();
 			return res.json(result);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -895,6 +908,7 @@ router.post(
 			);
 
 			if (result.ok) {
+				lifecycleController.recordInteractiveActivity();
 				return res.json(result);
 			}
 
@@ -939,6 +953,7 @@ router.post('/tabs/:tabId/back', async (req: Request<{ tabId: string }, unknown,
 		const { tabState } = found;
 		tabState.toolCalls++;
 		const result = await withTimeout(backTab(tabId, tabState), CONFIG.handlerTimeoutMs, 'back');
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -961,6 +976,7 @@ router.post('/tabs/:tabId/forward', async (req: Request<{ tabId: string }, unkno
 		const { tabState } = found;
 		tabState.toolCalls++;
 		const result = await withTimeout(forwardTab(tabId, tabState), CONFIG.handlerTimeoutMs, 'forward');
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -983,6 +999,7 @@ router.post('/tabs/:tabId/refresh', async (req: Request<{ tabId: string }, unkno
 		const { tabState } = found;
 		tabState.toolCalls++;
 		const result = await withTimeout(refreshTab(tabId, tabState), CONFIG.handlerTimeoutMs, 'refresh');
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -1154,6 +1171,7 @@ router.delete('/tabs/:tabId', async (req: Request<{ tabId: string }, unknown, { 
 			}
 			log('info', 'tab closed', { reqId: req.reqId, tabId: req.params.tabId, userId });
 		}
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -1186,6 +1204,7 @@ router.delete('/tabs/group/:listItemId', async (req: Request<{ listItemId: strin
 				sessionKey,
 			});
 		}
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -1205,6 +1224,7 @@ router.delete('/sessions/:userId', async (req: Request<{ userId: string }>, res:
 		await closeSessionsForUser(userId);
 		// Ensure downloads are cleaned even if the session was already partially removed.
 		cleanupUserDownloads(userId);
+		lifecycleController.recordInteractiveActivity();
 		return res.json({ ok: true });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);

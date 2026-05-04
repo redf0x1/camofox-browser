@@ -11,6 +11,7 @@ import { isAuthorizedWithAdminKey, isAuthorizedWithApiKey } from '../middleware/
 import { loadConfig } from '../utils/config';
 import { closeBrowser } from '../services/browser';
 import { contextPool } from '../services/context-pool';
+import { lifecycleController } from '../services/lifecycle-controller';
 import { registerDownloadListener } from '../services/download';
 import {
 	MAX_TABS_PER_SESSION,
@@ -181,6 +182,7 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		tabState.visitedUrls.add(url);
 
 		log('info', 'openclaw tab opened', { reqId: req.reqId, tabId, url: page.url() });
+		lifecycleController.recordInteractiveActivity();
 		return res.json({
 			ok: true,
 			targetId: tabId,
@@ -273,6 +275,7 @@ router.post('/navigate', async (req: Request<unknown, unknown, { targetId?: stri
 		);
 
 		if (result.status !== 200) return res.status(result.status).json(result.body);
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result.body);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -567,6 +570,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 			),
 		);
 
+		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);

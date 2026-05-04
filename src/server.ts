@@ -6,15 +6,20 @@ import coreRoutes from './routes/core';
 import openclawRoutes from './routes/openclaw';
 import { installCrashHandlers, safeError } from './middleware/errors';
 import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
+import { createLifecycleActivityMiddleware } from './middleware/lifecycle-activity';
 import { assertServerExposureSafety, loadConfig } from './utils/config';
 import { closeBrowser } from './services/browser';
 import { contextPool } from './services/context-pool';
+import { lifecycleController } from './services/lifecycle-controller';
 import {
 	closeAllSessions,
 	countTotalTabsForSessions,
 	getAllSessions,
 	startCleanupInterval as startSessionCleanupInterval,
 	stopCleanupInterval as stopSessionCleanupInterval,
+	runLifecycleIdleCleanup,
+	getLifecycleSessionSnapshot,
+	getSessionsSnapshot,
 } from './services/session';
 import {
 	startCleanupInterval as startDownloadCleanupInterval,
@@ -30,6 +35,7 @@ assertServerExposureSafety(CONFIG);
 const app = express();
 app.use(express.json({ limit: '100kb' }));
 app.use(loggingMiddleware);
+app.use(createLifecycleActivityMiddleware(lifecycleController));
 
 app.use(coreRoutes);
 app.use(openclawRoutes);
@@ -62,6 +68,17 @@ void detectYtDlp((message: unknown) => {
 });
 
 let shuttingDown = false;
+
+async function cleanupDaemonPidFileFromEnv(): Promise<void> {
+	const pidFile = process.env.CAMOFOX_SERVER_PID_FILE;
+	if (!pidFile) return;
+	try {
+		await require('node:fs/promises').rm(pidFile, { force: true });
+	} catch {
+		// Ignore cleanup errors
+	}
+}
+
 async function gracefulShutdown(signal: string): Promise<void> {
 	if (shuttingDown) return;
 	shuttingDown = true;
@@ -89,6 +106,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 		healthProbeInterval = null;
 	}
 	await closeBrowser().catch(() => {});
+	await cleanupDaemonPidFileFromEnv();
 	process.exit(0);
 }
 
@@ -112,6 +130,42 @@ server = app.listen(PORT, CONFIG.host, () => {
 		});
 	}, CONFIG.healthProbeIntervalMs);
 	healthProbeInterval.unref();
+
+	// Lifecycle idle cleanup check
+	setInterval(async () => {
+		const now = Date.now();
+		const sessionSnapshot = getLifecycleSessionSnapshot();
+		const contextSnapshot = contextPool.getLifecycleSnapshot();
+		lifecycleController.syncLiveState({
+			liveSessions: sessionSnapshot.liveSessions,
+			liveTabs: sessionSnapshot.liveTabs,
+			launchingContexts: contextSnapshot.launchingContexts,
+			stagedCreates: sessionSnapshot.stagedCreates,
+		});
+
+		// Stage 2: check for idle exit after successful cleanup
+		if (lifecycleController.shouldExit(now)) {
+			log('info', 'idle exit started');
+			await gracefulShutdown('IDLE_TIMEOUT');
+			return;
+		}
+
+		if (lifecycleController.shouldRunCleanup(now)) {
+			lifecycleController.markCleanupStarted(now);
+			// Snapshot sessions and contexts atomically BEFORE async cleanup work
+			const sessionsToCheck = getSessionsSnapshot();
+			const contextsToCheck = contextPool.getPoolEntries();
+			try {
+				const result = await runLifecycleIdleCleanup(sessionsToCheck, contextsToCheck, now);
+				lifecycleController.markCleanupFinished('success', Date.now());
+				log('info', 'idle cleanup completed', result);
+			} catch (error) {
+				lifecycleController.markCleanupFinished('failed', Date.now());
+				log('error', 'idle cleanup failed', { error: safeError(error) });
+			}
+		}
+	}, 250);
+
 	if (!CONFIG.apiKey) {
 		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — protected endpoints are only intended for loopback-only deployments.');
 		console.warn('[camofox] Set CAMOFOX_API_KEY before binding CAMOFOX_HOST beyond localhost.');

@@ -777,7 +777,8 @@ Then use profiles by name in API requests or CLI commands.
 | `CAMOFOX_VNC_BASE_PORT` | `6080` | noVNC/websockify base port |
 | `CAMOFOX_VNC_HOST` | `localhost` | noVNC host in returned URL |
 | `CAMOFOX_CLI_USER` | `cli-default` | Default CLI user id |
-| `CAMOFOX_IDLE_TIMEOUT_MS` | `1800000` | CLI server idle timeout |
+| `CAMOFOX_IDLE_TIMEOUT_MS` | `1800000` | Stage 1 idle cleanup threshold (ms) |
+| `CAMOFOX_IDLE_EXIT_TIMEOUT_MS` | `1800000` | Stage 2 daemon exit quiet window (ms, defaults to match Stage 1) |
 | `CAMOFOX_PRESETS_FILE` | (unset) | Optional JSON file defining/overriding geo presets |
 | `CAMOFOX_PROXY_PROFILES_FILE` | (unset) | Optional JSON file defining named proxy profiles for session-level overrides |
 | `CAMOFOX_SESSION_TIMEOUT` | `1800000` | Session idle timeout in ms (min `60000`) |
@@ -795,6 +796,27 @@ Then use profiles by name in API requests or CLI commands.
 | `CAMOFOX_FAILURE_THRESHOLD` | `3` | Consecutive failures before health degradation |
 | `CAMOFOX_YT_DLP_TIMEOUT_MS` | `30000` | Timeout for yt-dlp subtitle extraction |
 | `CAMOFOX_YT_BROWSER_TIMEOUT_MS` | `25000` | Timeout for browser transcript fallback |
+
+### Idle Lifecycle Policy
+
+CamoFox implements a two-stage idle lifecycle for graceful cleanup and daemon exit:
+
+**Stage 1 — Idle Cleanup**
+- After `CAMOFOX_IDLE_TIMEOUT_MS` of idle time (default: 30 minutes), the server runs cleanup to close idle sessions and tabs
+- Cleanup is delayed if browser contexts are launching or sessions are being created
+- New interactive activity (tab creation, navigation, interaction) cancels any pending cleanup
+
+**Stage 2 — Daemon Exit**
+- After Stage 1 cleanup completes, the server waits for `CAMOFOX_IDLE_EXIT_TIMEOUT_MS` (default: matches Stage 1 timeout)
+- If no new activity occurs during this quiet window, the daemon process exits gracefully
+- Any new request activity cancels the pending exit timer
+
+**Activity detection**:
+- Live tabs, launching browser contexts, or staged session creation count as active work and prevent cleanup
+- Empty sessions (sessions with no tabs) do not block cleanup but do disarm pending daemon exit
+- New interactive activity resets both cleanup and exit timers
+
+This two-stage model ensures cleanup runs before daemon exit, preventing resource leaks while allowing the server to shut down cleanly when fully idle.
 
 ## Deployment
 

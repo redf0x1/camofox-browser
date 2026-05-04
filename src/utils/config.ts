@@ -34,6 +34,8 @@ export interface ServerEnv {
   CAMOFOX_DOWNLOAD_TTL_MS?: string;
   CAMOFOX_MAX_DOWNLOAD_SIZE_MB?: string;
   CAMOFOX_IDLE_TIMEOUT_MS?: string;
+  CAMOFOX_IDLE_EXIT_TIMEOUT_MS?: string;
+  CAMOFOX_SERVER_PID_FILE?: string;
   CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
   CAMOFOX_MAX_BLOB_SIZE_MB?: string;
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
@@ -98,6 +100,7 @@ export interface AppConfig {
   presetsFile: string | undefined;
   proxyProfilesFile: string | undefined;
   idleTimeoutMs: number;
+  idleExitTimeoutMs: number;
   buildRefsTimeoutMs: number;
   tabLockTimeoutMs: number;
   healthProbeIntervalMs: number;
@@ -127,6 +130,8 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_DOWNLOAD_TTL_MS?: string;
   CAMOFOX_MAX_DOWNLOAD_SIZE_MB?: string;
   CAMOFOX_IDLE_TIMEOUT_MS?: string;
+  CAMOFOX_IDLE_EXIT_TIMEOUT_MS?: string;
+  CAMOFOX_SERVER_PID_FILE?: string;
   CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
   CAMOFOX_MAX_BLOB_SIZE_MB?: string;
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
@@ -288,6 +293,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const presetsFile = env.CAMOFOX_PRESETS_FILE || undefined;
   const proxyProfilesFile = env.CAMOFOX_PROXY_PROFILES_FILE || undefined;
   const idleTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_IDLE_TIMEOUT_MS, 1800000);
+  const idleExitTimeoutMs = parsePositiveIntOrDefault(env.CAMOFOX_IDLE_EXIT_TIMEOUT_MS, idleTimeoutMs);
 
   return {
     port,
@@ -321,6 +327,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     presetsFile,
     proxyProfilesFile,
     idleTimeoutMs,
+    idleExitTimeoutMs,
     buildRefsTimeoutMs,
     tabLockTimeoutMs,
     healthProbeIntervalMs,
@@ -356,6 +363,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_DOWNLOAD_TTL_MS: env.CAMOFOX_DOWNLOAD_TTL_MS,
       CAMOFOX_MAX_DOWNLOAD_SIZE_MB: env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB,
       CAMOFOX_IDLE_TIMEOUT_MS: env.CAMOFOX_IDLE_TIMEOUT_MS,
+      CAMOFOX_IDLE_EXIT_TIMEOUT_MS: env.CAMOFOX_IDLE_EXIT_TIMEOUT_MS,
       CAMOFOX_MAX_BATCH_CONCURRENCY: env.CAMOFOX_MAX_BATCH_CONCURRENCY,
       CAMOFOX_MAX_BLOB_SIZE_MB: env.CAMOFOX_MAX_BLOB_SIZE_MB,
       CAMOFOX_MAX_DOWNLOADS_PER_USER: env.CAMOFOX_MAX_DOWNLOADS_PER_USER,

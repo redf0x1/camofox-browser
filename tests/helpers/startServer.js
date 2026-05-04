@@ -87,6 +87,13 @@ async function startServer(port = 0, extraEnv = {}) {
 
 async function stopServer() {
   if (serverProcess) {
+    // If process has already exited, clean up and return immediately
+    if (serverProcess.exitCode !== null || serverProcess.killed) {
+      serverProcess = null;
+      serverPort = null;
+      return;
+    }
+
     return new Promise((resolve) => {
       const killTimer = setTimeout(() => {
         if (serverProcess) {
