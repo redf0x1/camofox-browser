@@ -10,6 +10,7 @@ jest.mock('../../dist/src/utils/config', () => ({
     userDataDir: '/tmp/camofox-test',
     profilesDir: '/tmp/camofox-test/profiles',
     port: 3000,
+    fingerprintDefaults: {},
     proxy: {
       host: '',
       port: '',

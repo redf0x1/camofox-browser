@@ -796,6 +796,13 @@ Then use profiles by name in API requests or CLI commands.
 | `CAMOFOX_FAILURE_THRESHOLD` | `3` | Consecutive failures before health degradation |
 | `CAMOFOX_YT_DLP_TIMEOUT_MS` | `30000` | Timeout for yt-dlp subtitle extraction |
 | `CAMOFOX_YT_BROWSER_TIMEOUT_MS` | `25000` | Timeout for browser transcript fallback |
+| `CAMOFOX_OS` | (unset) | Optional server-wide Camoufox OS override (`windows`, `macos`, `linux`, or comma-separated list for randomization) |
+| `CAMOFOX_ALLOW_WEBGL` | (unset) | Optional server-wide WebGL override; malformed values fail startup |
+| `CAMOFOX_SCREEN_WIDTH` | (unset) | Optional screen width override; applied only with `CAMOFOX_SCREEN_HEIGHT` |
+| `CAMOFOX_SCREEN_HEIGHT` | (unset) | Optional screen height override; applied only with `CAMOFOX_SCREEN_WIDTH` |
+| `CAMOFOX_HUMANIZE` | (unset) | Optional server-wide humanization override |
+
+> `CAMOFOX_OS` and `CAMOFOX_SCREEN_*` are **generation-time** controls: they affect only newly generated fingerprints and have no effect while an existing `fingerprint.json` sidecar is in use. Reset the profile or delete `fingerprint.json` to force regeneration under the new defaults. `CAMOFOX_ALLOW_WEBGL` and `CAMOFOX_HUMANIZE` are **launch-time** overrides and apply on every browser launch regardless of whether a sidecar is reused.
 
 ### Idle Lifecycle Policy
 
