@@ -344,6 +344,13 @@ export class ContextPool {
 			const fpPath = path.join(profileDir, 'fingerprint.json');
 			let fingerprint: Fingerprint | undefined;
 
+			const configuredOs = CONFIG.fingerprintDefaults.os;
+			const fingerprintOperatingSystems = Array.isArray(configuredOs)
+				? configuredOs
+				: configuredOs
+					? [configuredOs]
+					: [hostOS];
+
 			try {
 				const persistedFingerprint = readVersionedSidecar<Fingerprint>(fpPath, {
 					currentVersion: 1,
@@ -363,7 +370,7 @@ export class ContextPool {
 			}
 
 			if (!fingerprint) {
-				fingerprint = generateFingerprint(undefined, { operatingSystems: [hostOS] });
+				fingerprint = generateFingerprint(undefined, { operatingSystems: fingerprintOperatingSystems });
 				try {
 					writeVersionedSidecar(fpPath, 1, fingerprint);
 					log('info', 'generated new fingerprint and persisted it', { userId, fpPath });
@@ -375,8 +382,21 @@ export class ContextPool {
 			const opts = await launchOptions({
 				headless: effectiveHeadless,
 				...(virtualDisplay ? { virtual_display: virtualDisplay.get() } : {}),
-				os: hostOS,
-				humanize: true,
+				os: configuredOs ?? hostOS,
+				humanize: CONFIG.fingerprintDefaults.humanize ?? true,
+				...(CONFIG.fingerprintDefaults.allowWebgl !== undefined
+					? { allow_webgl: CONFIG.fingerprintDefaults.allowWebgl }
+					: {}),
+				...(CONFIG.fingerprintDefaults.screen
+				? {
+						screen: {
+							minWidth: CONFIG.fingerprintDefaults.screen.width,
+							maxWidth: CONFIG.fingerprintDefaults.screen.width,
+							minHeight: CONFIG.fingerprintDefaults.screen.height,
+							maxHeight: CONFIG.fingerprintDefaults.screen.height,
+						},
+					}
+				: {}),
 				enable_cache: true,
 				proxy: proxy ?? undefined,
 				geoip: !!proxy,
