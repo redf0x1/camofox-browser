@@ -16,6 +16,13 @@ export interface ProxyConfig {
   password: string;
 }
 
+export interface FingerprintDefaults {
+  os?: 'windows' | 'macos' | 'linux' | Array<'windows' | 'macos' | 'linux'>;
+  allowWebgl?: boolean;
+  screen?: { width: number; height: number };
+  humanize?: boolean;
+}
+
 export interface ServerEnv {
   PATH?: string;
   HOME?: string;
@@ -62,6 +69,11 @@ export interface ServerEnv {
   CAMOFOX_HEADLESS?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS?: string;
+  CAMOFOX_OS?: string;
+  CAMOFOX_ALLOW_WEBGL?: string;
+  CAMOFOX_SCREEN_WIDTH?: string;
+  CAMOFOX_SCREEN_HEIGHT?: string;
+  CAMOFOX_HUMANIZE?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -113,6 +125,7 @@ export interface AppConfig {
   evalExtendedRateLimitWindowMs: number;
   proxy: ProxyConfig;
   serverEnv: ServerEnv;
+  fingerprintDefaults: FingerprintDefaults;
 }
 
 export interface ConfigEnv extends NodeJS.ProcessEnv {
@@ -160,6 +173,11 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_HEADLESS?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX?: string;
   CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS?: string;
+  CAMOFOX_OS?: string;
+  CAMOFOX_ALLOW_WEBGL?: string;
+  CAMOFOX_SCREEN_WIDTH?: string;
+  CAMOFOX_SCREEN_HEIGHT?: string;
+  CAMOFOX_HUMANIZE?: string;
   PROXY_HOST?: string;
   PROXY_PORT?: string;
   PROXY_USERNAME?: string;
@@ -172,6 +190,35 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
 function parsePositiveIntOrDefault(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+type FingerprintOs = 'windows' | 'macos' | 'linux';
+
+function parseFingerprintOs(raw: string | undefined): FingerprintDefaults['os'] {
+  if (raw === undefined) return undefined;
+  const parts = raw
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+  if (!parts.length) {
+    throw new Error('CAMOFOX_OS must contain at least one value');
+  }
+  const allowed = new Set<FingerprintOs>(['windows', 'macos', 'linux']);
+  for (const part of parts) {
+    if (!allowed.has(part as FingerprintOs)) {
+      throw new Error(`CAMOFOX_OS contains unsupported value: ${JSON.stringify(part)}`);
+    }
+  }
+  return parts.length === 1 ? (parts[0] as FingerprintOs) : (parts as FingerprintOs[]);
+}
+
+function parseOptionalPositiveInt(raw: string | undefined, name: string): number | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer (got: ${JSON.stringify(raw)})`);
+  }
   return parsed;
 }
 
@@ -274,6 +321,20 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const allowPrivateNetworkTargets = allowPrivateNetworkOverride ?? isLoopbackHost(host);
   const evalExtendedRateLimitMax = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX, 20);
   const evalExtendedRateLimitWindowMs = parsePositiveIntOrDefault(env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS, 60000);
+
+  const fingerprintOs = parseFingerprintOs(env.CAMOFOX_OS);
+  const fingerprintAllowWebgl = parseOptionalBoolean(env.CAMOFOX_ALLOW_WEBGL) ?? undefined;
+  const fingerprintHumanize = parseOptionalBoolean(env.CAMOFOX_HUMANIZE) ?? undefined;
+  const fingerprintScreenWidth = parseOptionalPositiveInt(env.CAMOFOX_SCREEN_WIDTH, 'CAMOFOX_SCREEN_WIDTH');
+  const fingerprintScreenHeight = parseOptionalPositiveInt(env.CAMOFOX_SCREEN_HEIGHT, 'CAMOFOX_SCREEN_HEIGHT');
+
+  const fingerprintDefaults: FingerprintDefaults = {};
+  if (fingerprintOs !== undefined) fingerprintDefaults.os = fingerprintOs;
+  if (fingerprintAllowWebgl !== undefined) fingerprintDefaults.allowWebgl = fingerprintAllowWebgl;
+  if (fingerprintHumanize !== undefined) fingerprintDefaults.humanize = fingerprintHumanize;
+  if (fingerprintScreenWidth !== undefined && fingerprintScreenHeight !== undefined) {
+    fingerprintDefaults.screen = { width: fingerprintScreenWidth, height: fingerprintScreenHeight };
+  }
 
   const downloadTtlMs = parsePositiveIntOrDefault(env.CAMOFOX_DOWNLOAD_TTL_MS, 86_400_000);
   const maxDownloadSizeMb = parsePositiveIntOrDefault(env.CAMOFOX_MAX_DOWNLOAD_SIZE_MB, 100);
@@ -390,10 +451,16 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       CAMOFOX_HEADLESS: env.CAMOFOX_HEADLESS,
       CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_MAX,
       CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS: env.CAMOFOX_EVAL_EXTENDED_RATE_LIMIT_WINDOW_MS,
+      CAMOFOX_OS: env.CAMOFOX_OS,
+      CAMOFOX_ALLOW_WEBGL: env.CAMOFOX_ALLOW_WEBGL,
+      CAMOFOX_SCREEN_WIDTH: env.CAMOFOX_SCREEN_WIDTH,
+      CAMOFOX_SCREEN_HEIGHT: env.CAMOFOX_SCREEN_HEIGHT,
+      CAMOFOX_HUMANIZE: env.CAMOFOX_HUMANIZE,
       PROXY_HOST: env.PROXY_HOST,
       PROXY_PORT: env.PROXY_PORT,
       PROXY_USERNAME: env.PROXY_USERNAME,
       PROXY_PASSWORD: env.PROXY_PASSWORD,
     },
+    fingerprintDefaults,
   };
 }

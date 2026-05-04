@@ -101,4 +101,43 @@ describe('server exposure config safety', () => {
     expect(config.allowPrivateNetworkTargets).toBe(true);
     expect(() => assertServerExposureSafety(config)).not.toThrow();
   });
+
+  test('parses fingerprint env overrides when values are valid', () => {
+    const { loadConfig } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_OS: 'windows,macos',
+      CAMOFOX_ALLOW_WEBGL: 'true',
+      CAMOFOX_HUMANIZE: 'false',
+      CAMOFOX_SCREEN_WIDTH: '1920',
+      CAMOFOX_SCREEN_HEIGHT: '1080',
+    });
+
+    expect(config.fingerprintDefaults).toEqual({
+      os: ['windows', 'macos'],
+      allowWebgl: true,
+      humanize: false,
+      screen: { width: 1920, height: 1080 },
+    });
+  });
+
+  test('rejects malformed fingerprint boolean env values', () => {
+    const { loadConfig } = require('../../dist/src/utils/config');
+
+    expect(() =>
+      loadConfig({
+        CAMOFOX_ALLOW_WEBGL: 'sometimes',
+      }),
+    ).toThrow('Expected boolean value (true/false) but got: "sometimes"');
+  });
+
+  test('ignores incomplete screen size pairs', () => {
+    const { loadConfig } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_SCREEN_WIDTH: '1920',
+    });
+
+    expect(config.fingerprintDefaults).toEqual({});
+  });
 });
