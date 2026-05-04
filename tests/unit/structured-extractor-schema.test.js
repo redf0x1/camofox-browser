@@ -42,6 +42,17 @@ describe('structured-extractor schema validation (unit)', () => {
     ).toThrow('schema.fields.broken.attr is required for kind "attr"');
   });
 
+  test('rejects whitespace-only attr fields', () => {
+    expect(() =>
+      validateStructuredExtractSchema({
+        kind: 'object',
+        fields: {
+          broken: { kind: 'attr', selector: 'img', attr: '   ' },
+        },
+      }),
+    ).toThrow('schema.fields.broken.attr must be a non-empty string');
+  });
+
   test('rejects unsupported selector engines and arbitrary transforms', () => {
     expect(() =>
       validateStructuredExtractSchema({

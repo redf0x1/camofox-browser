@@ -103,6 +103,9 @@ function assertScalarOptionTypes(path: string, schema: StructuredExtractScalarSc
 	if (schema.coerce !== undefined && schema.coerce !== 'number' && schema.coerce !== 'url') {
 		throw new StructuredExtractSchemaError(`${path}.coerce must be "number" or "url"`);
 	}
+	if (schema.kind === 'attr' && schema.attr !== undefined) {
+		assertNonEmptyStringOption(path, 'attr', schema.attr);
+	}
 	if (schema.kind === 'url' && schema.attr !== undefined) {
 		assertNonEmptyStringOption(path, 'attr', schema.attr);
 	}
