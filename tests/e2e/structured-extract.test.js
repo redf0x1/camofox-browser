@@ -126,4 +126,28 @@ describe('Structured extract route', () => {
       await client.cleanup();
     }
   });
+
+  test('invalid structured schema returns a 400 route error payload', async () => {
+    const client = createClient(serverUrl);
+    const schema = {
+      kind: 'object',
+      fields: {
+        title: { kind: 'text', selector: '//h1' },
+      },
+    };
+
+    try {
+      const { tabId } = await client.createTab(`${testSiteUrl}/structured-products`);
+
+      await expect(client.extractStructured(tabId, schema)).rejects.toMatchObject({
+        status: 400,
+        data: {
+          ok: false,
+          error: 'schema.fields.title.selector must be a CSS selector',
+        },
+      });
+    } finally {
+      await client.cleanup();
+    }
+  });
 });
