@@ -44,6 +44,50 @@ const disallowedSelectorPatterns = [
 	/::[a-z-]+/i,
 	/[>+~]\s*$/,
 ];
+const allowedPseudoClasses = new Set([
+	'active',
+	'checked',
+	'default',
+	'defined',
+	'dir',
+	'disabled',
+	'empty',
+	'enabled',
+	'first-child',
+	'first-of-type',
+	'focus',
+	'focus-visible',
+	'focus-within',
+	'has',
+	'hover',
+	'indeterminate',
+	'in-range',
+	'invalid',
+	'is',
+	'lang',
+	'last-child',
+	'last-of-type',
+	'link',
+	'not',
+	'nth-child',
+	'nth-last-child',
+	'nth-last-of-type',
+	'nth-of-type',
+	'only-child',
+	'only-of-type',
+	'optional',
+	'out-of-range',
+	'placeholder-shown',
+	'read-only',
+	'read-write',
+	'required',
+	'root',
+	'scope',
+	'target',
+	'valid',
+	'visited',
+	'where',
+]);
 
 export class StructuredExtractSchemaError extends Error {
 	public readonly statusCode = 400;
@@ -72,15 +116,69 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 		);
 	}
 	if (
+		/^\d/.test(normalizedSelector) ||
 		normalizedSelector.startsWith('//') ||
 		normalizedSelector.startsWith('.//') ||
 		/^[a-z][a-z-]*=/i.test(normalizedSelector) ||
 		normalizedSelector.includes('::-p-') ||
 		disallowedSelectorPatterns.some((pattern) => pattern.test(normalizedSelector)) ||
+		hasUnsupportedPseudoClass(normalizedSelector) ||
 		!isBalancedCssSelector(normalizedSelector)
 	) {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
+}
+
+function hasUnsupportedPseudoClass(selector: string): boolean {
+	let activeQuote: '"' | "'" | null = null;
+	let escaped = false;
+	let bracketDepth = 0;
+
+	for (let index = 0; index < selector.length; index += 1) {
+		const char = selector[index];
+
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+
+		if (char === '\\') {
+			escaped = true;
+			continue;
+		}
+
+		if (activeQuote) {
+			if (char === activeQuote) activeQuote = null;
+			continue;
+		}
+
+		if (char === '"' || char === "'") {
+			activeQuote = char;
+			continue;
+		}
+
+		if (char === '[') {
+			bracketDepth += 1;
+			continue;
+		}
+
+		if (char === ']') {
+			bracketDepth = Math.max(0, bracketDepth - 1);
+			continue;
+		}
+
+		if (bracketDepth > 0 || char !== ':' || selector[index + 1] === ':') {
+			continue;
+		}
+
+		const match = selector.slice(index + 1).match(/^([a-z-]+)/i);
+		if (!match) return true;
+		if (!allowedPseudoClasses.has(match[1].toLowerCase())) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 function isBalancedCssSelector(selector: string): boolean {
@@ -167,6 +265,9 @@ function assertScalarOptionTypes(path: string, schema: StructuredExtractScalarSc
 	assertBooleanOption(path, 'trim', schema.trim);
 	assertStringOption(path, 'join', schema.join);
 	assertStringOption(path, 'attr', schema.attr);
+	if (schema.attr !== undefined && schema.kind !== 'attr' && schema.kind !== 'url') {
+		throw new StructuredExtractSchemaError(`${path}.attr is only supported for kind "attr" and "url"`);
+	}
 	if (schema.coerce !== undefined && schema.coerce !== 'number' && schema.coerce !== 'url') {
 		throw new StructuredExtractSchemaError(`${path}.coerce must be "number" or "url"`);
 	}

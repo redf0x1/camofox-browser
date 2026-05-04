@@ -184,6 +184,8 @@ describe('structured-extractor schema validation (unit)', () => {
       ':has-text("Buy")',
       'h1 >> text=Hello',
       'div>',
+      '1abc',
+      'div:unknown-pseudo',
     ];
 
     for (const selector of invalidSelectors) {
@@ -202,6 +204,29 @@ describe('structured-extractor schema validation (unit)', () => {
         expect(error).toBeInstanceOf(StructuredExtractSchemaError);
         expect(error.statusCode).toBe(400);
         expect(error.message).toBe('schema.fields.title.selector must be a CSS selector');
+      }
+    }
+  });
+
+  test('rejects attr on unsupported scalar kinds with structured schema errors', () => {
+    const invalidFields = [
+      { kind: 'text', selector: 'h1', attr: 'href' },
+      { kind: 'number', selector: '.price', attr: 'data-price' },
+    ];
+
+    for (const field of invalidFields) {
+      try {
+        validateStructuredExtractSchema({
+          kind: 'object',
+          fields: {
+            a: field,
+          },
+        });
+        throw new Error(`expected attr to be rejected for kind ${field.kind}`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+        expect(error.statusCode).toBe(400);
+        expect(error.message).toBe('schema.fields.a.attr is only supported for kind "attr" and "url"');
       }
     }
   });
