@@ -8,6 +8,11 @@ import type { Locator } from 'playwright-core';
 import { safeError } from '../middleware/errors';
 import { log } from '../middleware/logging';
 import { isAuthorizedWithAdminKey, isAuthorizedWithApiKey } from '../middleware/auth';
+import {
+	StructuredExtractRuntimeError,
+	StructuredExtractSchemaError,
+	extractStructuredData,
+} from '../services/structured-extractor';
 import { loadConfig } from '../utils/config';
 import { closeBrowser } from '../services/browser';
 import { contextPool } from '../services/context-pool';
@@ -42,6 +47,7 @@ import {
 	withTabLock,
 	withTimeout,
 } from '../services/tab';
+import type { StructuredExtractRootSchema } from '../types';
 
 const CONFIG = loadConfig();
 const PKG_VERSION = (() => {
@@ -373,6 +379,10 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 			text?: string;
 			loadState?: LoadStateLike;
 		}
+		interface ActExtractStructuredRequest extends ActRequestBase {
+			kind: 'extractStructured';
+			schema: unknown;
+		}
 		const body = req.body;
 		const kind = typeof body.kind === 'string' ? body.kind : undefined;
 		const targetId = typeof body.targetId === 'string' ? body.targetId : undefined;
@@ -551,6 +561,20 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 					return { ok: true, targetId, url: tabState.page.url() };
 				}
 
+				case 'extractStructured': {
+					const params = body as unknown as ActExtractStructuredRequest;
+					if (!params.schema || typeof params.schema !== 'object' || Array.isArray(params.schema)) {
+						throw new StructuredExtractSchemaError('schema must be an object');
+					}
+					const payload = await extractStructuredData(tabState.page, params.schema as StructuredExtractRootSchema);
+					return {
+						ok: true,
+						targetId,
+						data: payload.data,
+						metadata: payload.metadata,
+					};
+				}
+
 				case 'close': {
 					await safePageClose(tabState.page);
 					found.group.delete(String(targetId));
@@ -573,6 +597,16 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 		lifecycleController.recordInteractiveActivity();
 		return res.json(result);
 	} catch (err) {
+		if (err instanceof StructuredExtractSchemaError) {
+			return res.status(err.statusCode).json({ error: err.message });
+		}
+		if (err instanceof StructuredExtractRuntimeError) {
+			return res.status(err.statusCode).json({
+				error: 'Structured extraction failed',
+				fieldPath: err.fieldPath,
+				reason: err.reason,
+			});
+		}
 		const message = err instanceof Error ? err.message : String(err);
 		const kindFromBody = typeof (req.body as { kind?: unknown }).kind === 'string' ? (req.body as { kind?: unknown }).kind : undefined;
 		log('error', 'act failed', { reqId: req.reqId, kind: kindFromBody, error: message });
