@@ -173,12 +173,16 @@ describe('server exposure config safety', () => {
     const { loadConfig } = require('../../dist/src/utils/config');
 
     expect(() =>
+      loadConfig({ CAMOFOX_OS: '' }),
+    ).toThrow('CAMOFOX_OS must not be empty and must not contain empty tokens');
+
+    expect(() =>
       loadConfig({ CAMOFOX_OS: 'windows,' }),
-    ).toThrow('CAMOFOX_OS must not contain empty tokens');
+    ).toThrow('CAMOFOX_OS must not be empty and must not contain empty tokens');
 
     expect(() =>
       loadConfig({ CAMOFOX_OS: 'windows,,macos' }),
-    ).toThrow('CAMOFOX_OS must not contain empty tokens');
+    ).toThrow('CAMOFOX_OS must not be empty and must not contain empty tokens');
 
     expect(() =>
       loadConfig({ CAMOFOX_OS: 'android' }),

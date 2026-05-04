@@ -198,12 +198,9 @@ type FingerprintOs = 'windows' | 'macos' | 'linux';
 function parseFingerprintOs(raw: string | undefined): FingerprintDefaults['os'] {
   if (raw === undefined) return undefined;
   const parts = raw.split(',').map((part) => part.trim().toLowerCase());
-  // Reject empty tokens: trailing commas, consecutive commas, etc.
+  // Rejects empty string, trailing commas, and consecutive commas (split always yields ≥1 element).
   if (parts.some((p) => !p)) {
-    throw new Error('CAMOFOX_OS must not contain empty tokens (check for trailing or consecutive commas)');
-  }
-  if (!parts.length) {
-    throw new Error('CAMOFOX_OS must contain at least one value');
+    throw new Error('CAMOFOX_OS must not be empty and must not contain empty tokens (check for trailing or consecutive commas)');
   }
   const allowed = new Set<FingerprintOs>(['windows', 'macos', 'linux']);
   for (const part of parts) {
