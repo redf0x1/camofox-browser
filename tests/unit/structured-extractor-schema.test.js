@@ -1,10 +1,12 @@
 describe('structured-extractor schema validation (unit)', () => {
   /** @type {(schema:any) => any} */
   let validateStructuredExtractSchema;
+  /** @type {any} */
+  let StructuredExtractSchemaError;
 
   beforeEach(() => {
     jest.resetModules();
-    ({ validateStructuredExtractSchema } = require('../../dist/src/services/structured-extractor'));
+    ({ validateStructuredExtractSchema, StructuredExtractSchemaError } = require('../../dist/src/services/structured-extractor'));
   });
 
   test('accepts a nested object/list schema with scoped selectors', () => {
@@ -40,6 +42,19 @@ describe('structured-extractor schema validation (unit)', () => {
         },
       }),
     ).toThrow('schema.fields.broken.attr is required for kind "attr"');
+
+    try {
+      validateStructuredExtractSchema({
+        kind: 'object',
+        fields: {
+          broken: { kind: 'attr', selector: 'img' },
+        },
+      });
+      throw new Error('expected schema validation to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+      expect(error.statusCode).toBe(400);
+    }
   });
 
   test('rejects whitespace-only attr fields', () => {
