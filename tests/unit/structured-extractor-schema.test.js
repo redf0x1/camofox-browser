@@ -151,17 +151,26 @@ describe('structured-extractor schema validation (unit)', () => {
   });
 
   test('rejects malformed CSS selectors', () => {
-    expect(() =>
-      validateStructuredExtractSchema({
-        kind: 'object',
-        fields: {
-          title: {
-            kind: 'text',
-            selector: 'a[',
+    const invalidSelectors = ['a[', 'div[]', 'a[href=]', '[]', 'div[attr==value]'];
+
+    for (const selector of invalidSelectors) {
+      try {
+        validateStructuredExtractSchema({
+          kind: 'object',
+          fields: {
+            title: {
+              kind: 'text',
+              selector,
+            },
           },
-        },
-      }),
-    ).toThrow('schema.fields.title.selector must be a CSS selector');
+        });
+        throw new Error(`expected selector ${selector} to fail validation`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+        expect(error.statusCode).toBe(400);
+        expect(error.message).toBe('schema.fields.title.selector must be a CSS selector');
+      }
+    }
   });
 
   test('rejects Playwright-only selector syntax', () => {

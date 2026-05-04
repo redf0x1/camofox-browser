@@ -8,6 +8,11 @@ import type {
 	StructuredScalarKind,
 } from '../types';
 
+const cssTree = require('css-tree') as {
+	parse: (selector: string, options?: { context?: string }) => unknown;
+	walk: (ast: unknown, callback: (node: any) => void) => void;
+};
+
 type CompiledStructuredExtractScalarSchema = StructuredExtractScalarSchema & {
 	path: string;
 };
@@ -36,14 +41,6 @@ const joinKinds = new Set<StructuredScalarKind>(['text', 'attr', 'url']);
 const scalarSchemaKeys = new Set(['kind', 'selector', 'required', 'trim', 'join', 'coerce', 'attr']);
 const objectSchemaKeys = new Set(['kind', 'selector', 'required', 'fields']);
 const listSchemaKeys = new Set(['kind', 'selector', 'required', 'item']);
-const disallowedSelectorPatterns = [
-	/^internal:/i,
-	/>>/,
-	/:has-text\(/i,
-	/:(?:text|text-is|text-matches|nth-match|visible|near|right-of|left-of|above|below)\b/i,
-	/::[a-z-]+/i,
-	/[>+~]\s*$/,
-];
 const allowedPseudoClasses = new Set([
 	'active',
 	'checked',
@@ -110,121 +107,49 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a non-empty string`);
 	}
 	const normalizedSelector = selector.trim();
-	if (/::[a-z-]+/i.test(normalizedSelector) && !normalizedSelector.includes('::-p-')) {
-		throw new StructuredExtractSchemaError(
-			`${path}.selector must target DOM elements; pseudo-elements are not supported`,
-		);
-	}
-	if (
-		/^\d/.test(normalizedSelector) ||
-		normalizedSelector.startsWith('//') ||
-		normalizedSelector.startsWith('.//') ||
-		/^[a-z][a-z-]*=/i.test(normalizedSelector) ||
-		normalizedSelector.includes('::-p-') ||
-		disallowedSelectorPatterns.some((pattern) => pattern.test(normalizedSelector)) ||
-		hasUnsupportedPseudoClass(normalizedSelector) ||
-		!isBalancedCssSelector(normalizedSelector)
-	) {
+
+	let ast: unknown;
+	try {
+		ast = cssTree.parse(normalizedSelector, { context: 'selector' });
+	} catch {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
-}
 
-function hasUnsupportedPseudoClass(selector: string): boolean {
-	let activeQuote: '"' | "'" | null = null;
-	let escaped = false;
-	let bracketDepth = 0;
+	let previousNode: any = null;
+	let hasNode = false;
 
-	for (let index = 0; index < selector.length; index += 1) {
-		const char = selector[index];
-
-		if (escaped) {
-			escaped = false;
-			continue;
-		}
-
-		if (char === '\\') {
-			escaped = true;
-			continue;
-		}
-
-		if (activeQuote) {
-			if (char === activeQuote) activeQuote = null;
-			continue;
-		}
-
-		if (char === '"' || char === "'") {
-			activeQuote = char;
-			continue;
-		}
-
-		if (char === '[') {
-			bracketDepth += 1;
-			continue;
-		}
-
-		if (char === ']') {
-			bracketDepth = Math.max(0, bracketDepth - 1);
-			continue;
-		}
-
-		if (bracketDepth > 0 || char !== ':' || selector[index + 1] === ':') {
-			continue;
-		}
-
-		const match = selector.slice(index + 1).match(/^([a-z-]+)/i);
-		if (!match) return true;
-		if (!allowedPseudoClasses.has(match[1].toLowerCase())) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-function isBalancedCssSelector(selector: string): boolean {
-	const stack: string[] = [];
-	let activeQuote: '"' | "'" | null = null;
-	let escaped = false;
-
-	for (const char of selector) {
-		if (escaped) {
-			escaped = false;
-			continue;
-		}
-
-		if (char === '\\') {
-			escaped = true;
-			continue;
-		}
-
-		if (activeQuote) {
-			if (char === activeQuote) {
-				activeQuote = null;
+	cssTree.walk(ast, (node) => {
+		hasNode = true;
+		if (node.type === 'PseudoElementSelector') {
+			if (String(node.name || '').toLowerCase().startsWith('-p-')) {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 			}
-			continue;
+			throw new StructuredExtractSchemaError(
+				`${path}.selector must target DOM elements; pseudo-elements are not supported`,
+			);
 		}
 
-		if (char === '"' || char === "'") {
-			activeQuote = char;
-			continue;
+		if (node.type === 'PseudoClassSelector') {
+			const name = String(node.name || '').toLowerCase();
+			if (!allowedPseudoClasses.has(name)) {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+			}
 		}
 
-		if (char === '[' || char === '(') {
-			stack.push(char);
-			continue;
+		if (node.type === 'Combinator' && previousNode === null) {
+			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 		}
 
-		if (char === ']') {
-			if (stack.pop() !== '[') return false;
-			continue;
+		if (previousNode && previousNode.type === 'Combinator' && node.type === 'Combinator') {
+			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 		}
 
-		if (char === ')') {
-			if (stack.pop() !== '(') return false;
-		}
+		previousNode = node;
+	});
+
+	if (!hasNode || previousNode?.type === 'Combinator') {
+		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
-
-	return !activeQuote && stack.length === 0;
 }
 
 function assertNoTransform(path: string, schema: Record<string, unknown>): void {
