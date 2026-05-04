@@ -247,11 +247,26 @@ describe('structured-extractor schema validation (unit)', () => {
           kind: 'text',
           selector: 'div:has([data-x])',
         },
+        childRelativeContainer: {
+          kind: 'text',
+          selector: 'div:has(> .x)',
+        },
+        adjacentRelativeContainer: {
+          kind: 'text',
+          selector: 'div:has(+ .x)',
+        },
+        siblingRelativeContainer: {
+          kind: 'text',
+          selector: 'div:has(~ .x)',
+        },
       },
     });
 
     expect(compiled.fields.container.selector).toBe('div:has(.x)');
     expect(compiled.fields.attributeContainer.selector).toBe('div:has([data-x])');
+    expect(compiled.fields.childRelativeContainer.selector).toBe('div:has(> .x)');
+    expect(compiled.fields.adjacentRelativeContainer.selector).toBe('div:has(+ .x)');
+    expect(compiled.fields.siblingRelativeContainer.selector).toBe('div:has(~ .x)');
   });
 
   test('rejects additional non-CSS selector syntax with structured schema errors', () => {

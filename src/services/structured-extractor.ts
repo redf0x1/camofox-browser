@@ -177,32 +177,57 @@ function assertCssSelector(path: string, selector: string | undefined): void {
 		throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
 	}
 
-	cssTree.walk(ast, (node) => {
-		if (node.type !== 'Selector') {
+	const validateSelectorStructure = (node: any, allowLeadingCombinator = false): void => {
+		if (!node || typeof node !== 'object') {
 			return;
 		}
 
-		let previousNode: any = null;
-		let hasNode = false;
-
-		node.children.forEach((childNode: any) => {
-			hasNode = true;
-
-			if (childNode.type === 'Combinator' && previousNode === null) {
-				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
-			}
-
-			if (previousNode && previousNode.type === 'Combinator' && childNode.type === 'Combinator') {
-				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
-			}
-
-			previousNode = childNode;
-		});
-
-		if (!hasNode || previousNode?.type === 'Combinator') {
-			throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+		if (node.type === 'SelectorList') {
+			node.children.forEach((childNode: any) => {
+				validateSelectorStructure(childNode, allowLeadingCombinator);
+			});
+			return;
 		}
-	});
+
+		if (node.type === 'Selector') {
+			let previousNode: any = null;
+			let hasNode = false;
+
+			node.children.forEach((childNode: any) => {
+				hasNode = true;
+
+				if (childNode.type === 'Combinator' && previousNode === null && !allowLeadingCombinator) {
+					throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+				}
+
+				if (previousNode && previousNode.type === 'Combinator' && childNode.type === 'Combinator') {
+					throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+				}
+
+				previousNode = childNode;
+			});
+
+			if (!hasNode || previousNode?.type === 'Combinator') {
+				throw new StructuredExtractSchemaError(`${path}.selector must be a CSS selector`);
+			}
+
+			node.children.forEach((childNode: any) => {
+				validateSelectorStructure(childNode, false);
+			});
+			return;
+		}
+
+		const nestedAllowsLeadingCombinator =
+			node.type === 'PseudoClassSelector' && String(node.name || '').toLowerCase() === 'has';
+
+		if (node.children && typeof node.children.forEach === 'function') {
+			node.children.forEach((childNode: any) => {
+				validateSelectorStructure(childNode, nestedAllowsLeadingCombinator);
+			});
+		}
+	};
+
+	validateSelectorStructure(ast);
 
 	cssTree.walk(ast, (node) => {
 		if (node.type === 'PseudoElementSelector') {
