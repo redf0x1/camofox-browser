@@ -135,13 +135,6 @@ function getRouteErrorStatus(err: unknown): number {
 	if (typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number') {
 		return err.status;
 	}
-	if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ETIMEDOUT') {
-		return 504;
-	}
-	const message = err instanceof Error ? err.message : String(err);
-	if (message.includes('User concurrency limit reached')) {
-		return 429;
-	}
 	return 500;
 }
 
@@ -1501,7 +1494,7 @@ router.post('/tabs/:tabId/extract-structured', async (req, res) => {
 		}
 		const message = err instanceof Error ? err.message : String(err);
 		log('error', 'structured extract failed', { error: message });
-		return res.status(getRouteErrorStatus(err)).json({ ok: false, error: safeError(err) });
+		return res.status(500).json({ ok: false, error: safeError(err) });
 	}
 });
 
