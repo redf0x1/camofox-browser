@@ -35,6 +35,7 @@ export interface ServerEnv {
   CAMOFOX_MAX_DOWNLOAD_SIZE_MB?: string;
   CAMOFOX_IDLE_TIMEOUT_MS?: string;
   CAMOFOX_IDLE_EXIT_TIMEOUT_MS?: string;
+  CAMOFOX_SERVER_PID_FILE?: string;
   CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
   CAMOFOX_MAX_BLOB_SIZE_MB?: string;
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;
@@ -130,6 +131,7 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   CAMOFOX_MAX_DOWNLOAD_SIZE_MB?: string;
   CAMOFOX_IDLE_TIMEOUT_MS?: string;
   CAMOFOX_IDLE_EXIT_TIMEOUT_MS?: string;
+  CAMOFOX_SERVER_PID_FILE?: string;
   CAMOFOX_MAX_BATCH_CONCURRENCY?: string;
   CAMOFOX_MAX_BLOB_SIZE_MB?: string;
   CAMOFOX_MAX_DOWNLOADS_PER_USER?: string;

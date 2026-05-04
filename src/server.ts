@@ -68,6 +68,17 @@ void detectYtDlp((message: unknown) => {
 });
 
 let shuttingDown = false;
+
+async function cleanupDaemonPidFileFromEnv(): Promise<void> {
+	const pidFile = process.env.CAMOFOX_SERVER_PID_FILE;
+	if (!pidFile) return;
+	try {
+		await require('node:fs/promises').rm(pidFile, { force: true });
+	} catch {
+		// Ignore cleanup errors
+	}
+}
+
 async function gracefulShutdown(signal: string): Promise<void> {
 	if (shuttingDown) return;
 	shuttingDown = true;
@@ -95,6 +106,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 		healthProbeInterval = null;
 	}
 	await closeBrowser().catch(() => {});
+	await cleanupDaemonPidFileFromEnv();
 	process.exit(0);
 }
 
@@ -130,6 +142,13 @@ server = app.listen(PORT, CONFIG.host, () => {
 			launchingContexts: contextSnapshot.launchingContexts,
 			stagedCreates: sessionSnapshot.stagedCreates,
 		});
+
+		// Stage 2: check for idle exit after successful cleanup
+		if (lifecycleController.shouldExit(now)) {
+			log('info', 'idle exit started');
+			await gracefulShutdown('IDLE_TIMEOUT');
+			return;
+		}
 
 		if (lifecycleController.shouldRunCleanup(now)) {
 			lifecycleController.markCleanupStarted(now);

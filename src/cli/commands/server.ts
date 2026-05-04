@@ -33,12 +33,15 @@ export function registerServerCommands(program: Command, context: CliContext): v
 		.option('--port <port>', 'server port')
 		.option('--background', 'start daemon in background')
 		.option('--idle-timeout <minutes>', 'idle timeout in minutes')
-		.action(async (options: { port?: string; background?: boolean; idleTimeout?: string }, command: Command) => {
+		.option('--idle-exit-timeout <minutes>', 'daemon exit timeout in minutes after cleanup stage')
+		.action(async (options: { port?: string; background?: boolean; idleTimeout?: string; idleExitTimeout?: string }, command: Command) => {
 			try {
 				const cfg = loadConfig();
 				const port = options.port ? parsePort(options.port) : undefined;
 				const idleTimeoutMinutes = parseIdleTimeoutMinutes(options.idleTimeout);
 				const idleTimeoutMs = idleTimeoutMinutes ? Math.floor(idleTimeoutMinutes * 60_000) : undefined;
+				const idleExitTimeoutMinutes = parseIdleTimeoutMinutes(options.idleExitTimeout);
+				const idleExitTimeoutMs = idleExitTimeoutMinutes ? Math.floor(idleExitTimeoutMinutes * 60_000) : undefined;
 				const manager = new ServerManager(port);
 
 				if (await manager.isRunning()) {
@@ -47,7 +50,7 @@ export function registerServerCommands(program: Command, context: CliContext): v
 				}
 
 				if (options.background) {
-					await manager.startDaemon({ port, idleTimeoutMs });
+					await manager.startDaemon({ port, idleTimeoutMs, idleExitTimeoutMs });
 					await manager.waitForReady();
 					context.print(command, { ok: true, mode: 'background', port: ServerManager.getPort(port) });
 					return;
@@ -59,6 +62,7 @@ export function registerServerCommands(program: Command, context: CliContext): v
 						...cfg.serverEnv,
 						PORT: String(ServerManager.getPort(port)),
 						CAMOFOX_IDLE_TIMEOUT_MS: String(idleTimeoutMs ?? cfg.idleTimeoutMs),
+						CAMOFOX_IDLE_EXIT_TIMEOUT_MS: String(idleExitTimeoutMs ?? cfg.idleExitTimeoutMs),
 					},
 				});
 

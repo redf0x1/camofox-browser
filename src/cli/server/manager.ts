@@ -44,7 +44,7 @@ export class ServerManager {
 		await this.waitForReady();
 	}
 
-	public async startDaemon(options?: { idleTimeoutMs?: number; port?: number }): Promise<void> {
+	public async startDaemon(options?: { idleTimeoutMs?: number; idleExitTimeoutMs?: number; port?: number }): Promise<void> {
 		const targetPort = ServerManager.getPort(options?.port ?? this.port);
 		this.ensureDirectories();
 		if (await this.isPortInUse(targetPort)) {
@@ -63,6 +63,8 @@ export class ServerManager {
 					...cfg.serverEnv,
 					PORT: String(targetPort),
 					CAMOFOX_IDLE_TIMEOUT_MS: String(options?.idleTimeoutMs ?? cfg.idleTimeoutMs),
+					CAMOFOX_IDLE_EXIT_TIMEOUT_MS: String(options?.idleExitTimeoutMs ?? cfg.idleExitTimeoutMs),
+					CAMOFOX_SERVER_PID_FILE: this.pidFilePath,
 				},
 			});
 
