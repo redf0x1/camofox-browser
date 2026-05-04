@@ -250,6 +250,7 @@ function validateStructuredExtractNode(
 export function validateStructuredExtractSchema(
 	schema: StructuredExtractRootSchema,
 ): CompiledStructuredExtractRootSchema {
+	assertRecord('schema', schema);
 	if (schema.kind !== 'object' && schema.kind !== 'list') {
 		throw new StructuredExtractSchemaError('schema.kind must be "object" or "list" at the root');
 	}

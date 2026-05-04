@@ -115,6 +115,26 @@ describe('structured-extractor schema validation (unit)', () => {
     }
   });
 
+  test('rejects null and undefined root schemas with a 400 structured schema error', () => {
+    try {
+      validateStructuredExtractSchema(null);
+      throw new Error('expected root schema validation to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+      expect(error.statusCode).toBe(400);
+      expect(error.message).toBe('schema must be an object');
+    }
+
+    try {
+      validateStructuredExtractSchema(undefined);
+      throw new Error('expected root schema validation to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructuredExtractSchemaError);
+      expect(error.statusCode).toBe(400);
+      expect(error.message).toBe('schema must be an object');
+    }
+  });
+
   test('rejects unsupported selector engines and arbitrary transforms', () => {
     expect(() =>
       validateStructuredExtractSchema({
