@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [2.4.0] - 2026-05-04
+## [2.4.0] - 2026-05-05
 
 ### Upgrade Notes
 - **New Wave 2 surfaces** add OpenAPI specification, interactive Swagger UI documentation, server-wide fingerprint environment controls, idle lifecycle policies, session-level proxy/geo overrides, and structured extraction. These are additive capabilities and do not remove any previous route or alias.

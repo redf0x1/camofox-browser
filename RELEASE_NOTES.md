@@ -24,7 +24,7 @@ CamoFox Browser Server is in **Preview** (Phase 1). See [Preview Status](README.
 
 > **Upgrade guidance for v2.4.0+:** Wave 2 introduces OpenAPI documentation at `/openapi.json` and `/api/docs`, server-wide fingerprint environment controls (`CAMOFOX_OS`, `CAMOFOX_ALLOW_WEBGL`, `CAMOFOX_SCREEN_WIDTH`, `CAMOFOX_SCREEN_HEIGHT`, `CAMOFOX_HUMANIZE`), idle lifecycle policies (`CAMOFOX_IDLE_TIMEOUT_MS`, `CAMOFOX_IDLE_EXIT_TIMEOUT_MS`), session-level proxy/geo overrides via `proxyProfile` or raw `proxy` fields, hybrid geo modes (`explicit-wins` vs `proxy-locked`), and structured extraction with schema validation. Security defaults now include loopback-only binding (`CAMOFOX_HOST=127.0.0.1`), non-loopback API key requirement, navigation target validation blocking private/loopback hosts unless `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`, and fail-fast proxy deployment validation. Local-state sidecar versioning remains fail-closed — incompatible state causes the affected session to error with the specific path to delete. When `CAMOFOX_API_KEY` is set, core and OpenClaw protected endpoints require `Authorization: Bearer` auth; `POST /stop` requires `CAMOFOX_ADMIN_KEY` unconditionally.
 
-> **Note:** A 2.1.x maintenance lane would only be opened if a user-facing defect in published v2.1.1 requires hotfix maintenance. Current development continues on the 2.3.0+ line.
+> **Note:** A 2.1.x maintenance lane would only be opened if a user-facing defect in published v2.1.1 requires hotfix maintenance. Current development continues on the 2.4.0+ line.
 
 > Earlier versions (v2.0.4 and below) are documented in individual release entries below. Note: v2.0.3 was reserved on npm; its content was published as v2.0.4.
 
