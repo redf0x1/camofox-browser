@@ -139,6 +139,7 @@ docker run -d \
   -p 9377:9377 \
   -p 6080:6080 \
   -e CAMOFOX_HOST=0.0.0.0 \
+  -e CAMOFOX_AUTH_MODE=auto \
   -e CAMOFOX_API_KEY=change-me \
   -v ~/.camofox:/home/node/.camofox \
   camofox-browser
@@ -157,7 +158,8 @@ services:
     environment:
       CAMOFOX_HOST: "0.0.0.0"
       CAMOFOX_PORT: "9377"
-      # Required when CAMOFOX_HOST is non-loopback
+      # auto requires CAMOFOX_API_KEY when CAMOFOX_HOST is non-loopback
+      CAMOFOX_AUTH_MODE: "auto"
       CAMOFOX_API_KEY: "change-me"
       # CAMOFOX_ADMIN_KEY: "change-me"
       # Optional: proxy routing (also enables Camoufox geoip mode)
@@ -466,7 +468,7 @@ AI Agent (MCP / OpenClaw / REST Client)
 
 Base URL: `http://localhost:9377`
 
-> **Security defaults:** `CAMOFOX_HOST` now defaults to `127.0.0.1`. If you bind beyond loopback (for example `0.0.0.0` in Docker or PaaS), `CAMOFOX_API_KEY` becomes required at startup. On non-loopback binds, navigation targets on loopback/private/link-local/metadata hosts are blocked by default unless you explicitly set `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`. If you also configure `PROXY_HOST`/`PROXY_PORT`, exposed deployments must opt into `CAMOFOX_ALLOW_PRIVATE_NETWORK=true` until proxy-side private-target validation exists.
+> **Security defaults:** `CAMOFOX_HOST` now defaults to `127.0.0.1`, and `CAMOFOX_AUTH_MODE=auto` keeps local loopback usage open while requiring `CAMOFOX_API_KEY` when you bind beyond loopback (for example `0.0.0.0` in Docker or PaaS). Set `CAMOFOX_AUTH_MODE=required` to require API-key auth everywhere. Set `CAMOFOX_AUTH_MODE=disabled` only for trusted private agent networks whose clients cannot send bearer tokens; this disables API-key auth for protected endpoints and keeps private-network navigation blocked. On non-loopback binds, navigation targets on loopback/private/link-local/metadata hosts are blocked by default unless you explicitly set `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`. If you also configure `PROXY_HOST`/`PROXY_PORT`, exposed deployments must opt into `CAMOFOX_ALLOW_PRIVATE_NETWORK=true` until proxy-side private-target validation exists.
 
 ### API Documentation
 
@@ -534,7 +536,7 @@ Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the se
 POST /sessions/:userId/toggle-display
 {"headless": "virtual"}
 ```
-**Auth:** Conditional — requires `Authorization: Bearer $CAMOFOX_API_KEY` when `CAMOFOX_API_KEY` is set.
+**Auth:** Conditional — requires `Authorization: Bearer $CAMOFOX_API_KEY` when `CAMOFOX_AUTH_MODE=required` or when `auto` mode has an API key configured. No auth is required in `CAMOFOX_AUTH_MODE=disabled`.
 Switch browser between headless and headed mode. When encountering CAPTCHAs or issues requiring visual interaction, switch to headed mode to show the browser window.
 
 Returns:
@@ -566,7 +568,7 @@ The VNC session auto-terminates after 2 minutes (configurable via `CAMOFOX_VNC_T
 ### Evaluate JavaScript
 Execute a JavaScript expression in the page context and return the JSON-serializable result.
 
-Auth: required only when `CAMOFOX_API_KEY` is set on the server; otherwise no auth is required.
+Auth: required when `CAMOFOX_AUTH_MODE=required` or when `auto` mode has an API key configured; no auth is required in `CAMOFOX_AUTH_MODE=disabled`.
 
 Note: async expressions must be wrapped in an async IIFE (for example, `(async () => { ... })()`). Top-level `await` is not supported.
 
@@ -579,7 +581,7 @@ Returns: `{"ok": true, "result": "Page Title", "resultType": "string", "truncate
 ### Evaluate JavaScript (Extended)
 Execute a long-running JavaScript expression (up to 300s timeout). Conditionally API-key protected. Rate limited.
 
-Auth: required only when `CAMOFOX_API_KEY` is set on the server; otherwise no auth is required.
+Auth: required when `CAMOFOX_AUTH_MODE=required` or when `auto` mode has an API key configured; no auth is required in `CAMOFOX_AUTH_MODE=disabled`.
 
 Note: async expressions must be wrapped in an async IIFE (for example, `(async () => { ... })()`). Top-level `await` is not supported.
 
@@ -832,9 +834,10 @@ Then use profiles by name in API requests or CLI commands.
 | `CAMOFOX_PORT` | `9377` | Server port |
 | `PORT` | (optional) | Alternative port env var (common in PaaS) |
 | `NODE_ENV` | `development` | Node environment |
-| `CAMOFOX_HOST` | `127.0.0.1` | Server bind host. Set `0.0.0.0` for Docker/PaaS/network exposure. Non-loopback binds require `CAMOFOX_API_KEY`. |
+| `CAMOFOX_HOST` | `127.0.0.1` | Server bind host. Set `0.0.0.0` for Docker/PaaS/network exposure. Non-loopback binds require `CAMOFOX_API_KEY` unless `CAMOFOX_AUTH_MODE=disabled`. |
 | `CAMOFOX_ADMIN_KEY` | (empty) | Required for `POST /stop` (sent via `x-admin-key`) |
-| `CAMOFOX_API_KEY` | (empty) | Guards protected endpoints (tab creation, navigation, interaction, session management, downloads, image extraction, tracing, console) via `Authorization: Bearer` header when set. Required whenever `CAMOFOX_HOST` exposes the server beyond loopback. |
+| `CAMOFOX_AUTH_MODE` | `auto` | API-key policy: `auto` allows loopback without auth and requires `CAMOFOX_API_KEY` for non-loopback binds; `required` requires `CAMOFOX_API_KEY` for every bind; `disabled` disables API-key auth for protected endpoints and is only for trusted private agent networks. |
+| `CAMOFOX_API_KEY` | (empty) | Guards protected endpoints (tab creation, navigation, interaction, session management, downloads, image extraction, tracing, console) via `Authorization: Bearer` header when set. Required in `CAMOFOX_AUTH_MODE=required`, and required by `auto` whenever `CAMOFOX_HOST` exposes the server beyond loopback. Must be unset when `CAMOFOX_AUTH_MODE=disabled`. |
 | `CAMOFOX_ALLOW_PRIVATE_NETWORK` | `true` on loopback binds, `false` otherwise | Allows navigation to loopback/private/link-local/metadata targets. Leave unset for the safe default; enable only for trusted deployments that intentionally need internal-network reachability. |
 | `CAMOFOX_HEADLESS` | `true` | Display mode: `true` (headless), `false` (headed), `virtual` (Xvfb) |
 | `CAMOFOX_VNC_RESOLUTION` | `1920x1080x24` | Virtual Xvfb display resolution (`WIDTHxHEIGHTxDEPTH`) |
@@ -917,9 +920,25 @@ docker run -p 9377:9377 -p 6080:6080 \
   -v ~/.camofox:/home/node/.camofox \
   -e CAMOFOX_HOST=0.0.0.0 \
   -e CAMOFOX_PORT=9377 \
+  -e CAMOFOX_AUTH_MODE=auto \
   -e CAMOFOX_API_KEY=change-me \
   camofox-browser
 ```
+
+For private Docker networks used by agents such as Hermes, OpenClaw, or GoClaw that cannot send a bearer token, keep the service off published host ports and disable API-key auth explicitly:
+
+```bash
+docker network create camofox-agents
+docker run -d \
+  --name camofox-browser \
+  --network camofox-agents \
+  -e CAMOFOX_HOST=0.0.0.0 \
+  -e CAMOFOX_AUTH_MODE=disabled \
+  -v ~/.camofox:/home/node/.camofox \
+  camofox-browser
+```
+
+Then configure the agent with `CAMOFOX_URL=http://camofox-browser:9377` from another container on the same Docker network. Do not combine `CAMOFOX_AUTH_MODE=disabled` with public port publishing or `CAMOFOX_ALLOW_PRIVATE_NETWORK=true`.
 
 ### Fly.io
 

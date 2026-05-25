@@ -168,7 +168,10 @@ server = app.listen(PORT, CONFIG.host, () => {
 		}
 	}, 250);
 
-	if (!CONFIG.apiKey) {
+	if (CONFIG.authMode === 'disabled') {
+		console.warn('[camofox] ⚠️  CAMOFOX_AUTH_MODE=disabled — API key authentication is disabled for all protected endpoints.');
+		console.warn('[camofox] Only use disabled auth mode on trusted private networks; do not publish this server to untrusted networks.');
+	} else if (!CONFIG.apiKey) {
 		console.warn('[camofox] ⚠️  CAMOFOX_API_KEY not set — protected endpoints are only intended for loopback-only deployments.');
 		console.warn('[camofox] Set CAMOFOX_API_KEY before binding CAMOFOX_HOST beyond localhost.');
 	}

@@ -17,9 +17,20 @@ describe('server exposure config safety', () => {
 
     const config = loadConfig({});
 
+    expect(config.authMode).toBe('auto');
     expect(config.host).toBe('127.0.0.1');
     expect(config.allowPrivateNetworkTargets).toBe(true);
     expect(() => assertServerExposureSafety(config)).not.toThrow();
+  });
+
+  test('rejects unsupported auth modes', () => {
+    const { loadConfig } = require('../../dist/src/utils/config');
+
+    expect(() =>
+      loadConfig({
+        CAMOFOX_AUTH_MODE: 'off',
+      }),
+    ).toThrow('CAMOFOX_AUTH_MODE must be one of: auto, required, disabled');
   });
 
   test('rejects non-loopback bind without an API key', () => {
@@ -35,6 +46,32 @@ describe('server exposure config safety', () => {
     );
   });
 
+  test('requires an API key in required auth mode even on loopback', () => {
+    const { loadConfig, assertServerExposureSafety } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_AUTH_MODE: 'required',
+    });
+
+    expect(config.authMode).toBe('required');
+    expect(config.host).toBe('127.0.0.1');
+    expect(() => assertServerExposureSafety(config)).toThrow(
+      'CAMOFOX_API_KEY is required when CAMOFOX_AUTH_MODE=required',
+    );
+  });
+
+  test('allows required auth mode when an API key is configured', () => {
+    const { loadConfig, assertServerExposureSafety } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_AUTH_MODE: 'required',
+      CAMOFOX_API_KEY: 'super-secret',
+    });
+
+    expect(config.authMode).toBe('required');
+    expect(() => assertServerExposureSafety(config)).not.toThrow();
+  });
+
   test('allows non-loopback bind when an API key is configured', () => {
     const { loadConfig, assertServerExposureSafety } = require('../../dist/src/utils/config');
 
@@ -46,6 +83,58 @@ describe('server exposure config safety', () => {
     expect(config.host).toBe('0.0.0.0');
     expect(config.allowPrivateNetworkTargets).toBe(false);
     expect(() => assertServerExposureSafety(config)).not.toThrow();
+  });
+
+  test('allows disabled auth mode to bind beyond loopback without an API key', () => {
+    const { loadConfig, assertServerExposureSafety } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_AUTH_MODE: 'disabled',
+      CAMOFOX_HOST: '0.0.0.0',
+    });
+
+    expect(config.authMode).toBe('disabled');
+    expect(config.apiKey).toBe('');
+    expect(config.allowPrivateNetworkTargets).toBe(false);
+    expect(() => assertServerExposureSafety(config)).not.toThrow();
+  });
+
+  test('allows disabled auth mode on loopback with local private-network defaults', () => {
+    const { loadConfig, assertServerExposureSafety } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_AUTH_MODE: 'disabled',
+    });
+
+    expect(config.host).toBe('127.0.0.1');
+    expect(config.allowPrivateNetworkTargets).toBe(true);
+    expect(() => assertServerExposureSafety(config)).not.toThrow();
+  });
+
+  test('rejects disabled auth mode when an API key is still configured', () => {
+    const { loadConfig } = require('../../dist/src/utils/config');
+
+    expect(() =>
+      loadConfig({
+        CAMOFOX_AUTH_MODE: 'disabled',
+        CAMOFOX_API_KEY: 'super-secret',
+      }),
+    ).toThrow('CAMOFOX_API_KEY must not be set when CAMOFOX_AUTH_MODE=disabled');
+  });
+
+  test('rejects disabled auth mode with explicit private-network access', () => {
+    const { loadConfig, assertServerExposureSafety } = require('../../dist/src/utils/config');
+
+    const config = loadConfig({
+      CAMOFOX_AUTH_MODE: 'disabled',
+      CAMOFOX_HOST: '0.0.0.0',
+      CAMOFOX_ALLOW_PRIVATE_NETWORK: 'true',
+    });
+
+    expect(config.allowPrivateNetworkTargets).toBe(true);
+    expect(() => assertServerExposureSafety(config)).toThrow(
+      'CAMOFOX_ALLOW_PRIVATE_NETWORK=true is not allowed when CAMOFOX_AUTH_MODE=disabled',
+    );
   });
 
   test('treats the full 127.0.0.0/8 range as loopback', () => {

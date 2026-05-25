@@ -32,6 +32,7 @@ export interface ServerEnv {
   MAX_CONCURRENT_PER_USER?: string;
   CAMOFOX_ADMIN_KEY?: string;
   CAMOFOX_API_KEY?: string;
+  CAMOFOX_AUTH_MODE?: string;
   CAMOFOX_HOST?: string;
   CAMOFOX_ALLOW_PRIVATE_NETWORK?: string;
   CAMOFOX_CONSOLE_BUFFER_SIZE?: string;
@@ -86,6 +87,7 @@ export interface AppConfig {
   nodeEnv: string;
   adminKey: string;
   apiKey: string;
+  authMode: AuthMode;
   allowPrivateNetworkTargets: boolean;
   cookiesDir: string;
   profilesDir: string;
@@ -134,6 +136,7 @@ export interface ConfigEnv extends NodeJS.ProcessEnv {
   NODE_ENV?: string;
   CAMOFOX_ADMIN_KEY?: string;
   CAMOFOX_API_KEY?: string;
+  CAMOFOX_AUTH_MODE?: string;
   CAMOFOX_HOST?: string;
   CAMOFOX_ALLOW_PRIVATE_NETWORK?: string;
   CAMOFOX_CONSOLE_BUFFER_SIZE?: string;
@@ -194,6 +197,7 @@ function parsePositiveIntOrDefault(raw: string | undefined, fallback: number): n
 }
 
 type FingerprintOs = 'windows' | 'macos' | 'linux';
+export type AuthMode = 'auto' | 'required' | 'disabled';
 
 function parseFingerprintOs(raw: string | undefined): FingerprintDefaults['os'] {
   if (raw === undefined) return undefined;
@@ -244,6 +248,15 @@ function parseOptionalBoolean(raw: string | undefined): boolean | null {
   throw new Error(`Expected boolean value (true/false) but got: ${JSON.stringify(raw)}`);
 }
 
+function parseAuthMode(raw: string | undefined): AuthMode {
+  if (raw === undefined) return 'auto';
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'auto' || normalized === 'required' || normalized === 'disabled') {
+    return normalized;
+  }
+  throw new Error(`CAMOFOX_AUTH_MODE must be one of: auto, required, disabled (got: ${JSON.stringify(raw)})`);
+}
+
 export function isLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase();
   if (normalized === 'localhost' || normalized === '::1' || normalized === '[::1]') return true;
@@ -264,12 +277,19 @@ function hasConfiguredProxy(proxy: Pick<ProxyConfig, 'host' | 'port'>): boolean 
 }
 
 export function assertServerExposureSafety(
-  config: Pick<AppConfig, 'host' | 'apiKey' | 'allowPrivateNetworkTargets' | 'proxy'>,
+  config: Pick<AppConfig, 'host' | 'apiKey' | 'authMode' | 'allowPrivateNetworkTargets' | 'proxy'>,
 ): void {
-  if (!isLoopbackHost(config.host) && !config.apiKey) {
+  const exposesBeyondLoopback = !isLoopbackHost(config.host);
+  if (config.authMode === 'required' && !config.apiKey) {
+    throw new Error('CAMOFOX_API_KEY is required when CAMOFOX_AUTH_MODE=required');
+  }
+  if (exposesBeyondLoopback && config.authMode === 'disabled' && config.allowPrivateNetworkTargets) {
+    throw new Error('CAMOFOX_ALLOW_PRIVATE_NETWORK=true is not allowed when CAMOFOX_AUTH_MODE=disabled');
+  }
+  if (exposesBeyondLoopback && config.authMode !== 'disabled' && !config.apiKey) {
     throw new Error('CAMOFOX_API_KEY is required when CAMOFOX_HOST exposes the server beyond loopback');
   }
-  if (!isLoopbackHost(config.host) && !config.allowPrivateNetworkTargets && hasConfiguredProxy(config.proxy)) {
+  if (exposesBeyondLoopback && !config.allowPrivateNetworkTargets && hasConfiguredProxy(config.proxy)) {
     throw new Error(
       'Proxy-enabled non-loopback deployments must set CAMOFOX_ALLOW_PRIVATE_NETWORK=true until proxy-side private-target validation is supported',
     );
@@ -282,6 +302,11 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
   const host = (env.CAMOFOX_HOST || '127.0.0.1').trim();
   if (!host) {
     throw new Error('CAMOFOX_HOST must be a non-empty string');
+  }
+  const authMode = parseAuthMode(env.CAMOFOX_AUTH_MODE);
+  const apiKey = env.CAMOFOX_API_KEY || '';
+  if (authMode === 'disabled' && apiKey) {
+    throw new Error('CAMOFOX_API_KEY must not be set when CAMOFOX_AUTH_MODE=disabled');
   }
 
   const cookiesDir = env.CAMOFOX_COOKIES_DIR || join(os.homedir(), '.camofox', 'cookies');
@@ -364,7 +389,8 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
     host,
     nodeEnv: env.NODE_ENV || 'development',
     adminKey: env.CAMOFOX_ADMIN_KEY || '',
-    apiKey: env.CAMOFOX_API_KEY || '',
+    apiKey,
+    authMode,
     allowPrivateNetworkTargets,
     cookiesDir,
     profilesDir,
@@ -420,6 +446,7 @@ export function loadConfig(env: ConfigEnv = process.env): AppConfig {
       MAX_CONCURRENT_PER_USER: env.MAX_CONCURRENT_PER_USER,
       CAMOFOX_ADMIN_KEY: env.CAMOFOX_ADMIN_KEY,
       CAMOFOX_API_KEY: env.CAMOFOX_API_KEY,
+      CAMOFOX_AUTH_MODE: env.CAMOFOX_AUTH_MODE,
       CAMOFOX_CONSOLE_BUFFER_SIZE: env.CAMOFOX_CONSOLE_BUFFER_SIZE,
       CAMOFOX_COOKIES_DIR: env.CAMOFOX_COOKIES_DIR,
       CAMOFOX_PROFILES_DIR: env.CAMOFOX_PROFILES_DIR,

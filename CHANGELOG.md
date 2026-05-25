@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [2.4.5] - 2026-05-25
+
+### Added
+- Added `CAMOFOX_AUTH_MODE=auto|required|disabled` to make API-key enforcement explicit: `auto` preserves secure defaults, `required` enforces bearer auth on every bind, and `disabled` supports trusted private agent networks whose clients cannot send bearer tokens.
+
+### Security
+- `CAMOFOX_AUTH_MODE=disabled` now permits non-loopback binds without `CAMOFOX_API_KEY` only while keeping private-network navigation blocked; startup fails if disabled auth is combined with `CAMOFOX_ALLOW_PRIVATE_NETWORK=true` on non-loopback binds.
+
+### Tests
+- Added unit and E2E coverage for auth-mode parsing, required-mode startup failure, disabled-mode network bind compatibility, and disabled-mode private-network guardrails.
+
 ## [2.4.4] - 2026-05-23
 
 ### Fixed

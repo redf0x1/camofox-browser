@@ -3,7 +3,7 @@ const { once } = require('node:events');
 
 const { launchServer } = require('../../dist/src/utils/launcher');
 const { loadConfig } = require('../../dist/src/utils/config');
-const { startServer, stopServer, getServerUrl } = require('../helpers/startServer');
+const { startServer, stopServer, getServerUrl, getServerLogs } = require('../helpers/startServer');
 const { startTestSite, stopTestSite, getTestSiteUrl } = require('../helpers/testSite');
 
 describe('security hardening', () => {
@@ -34,6 +34,64 @@ describe('security hardening', () => {
 
     const authorized = await fetch(`${getServerUrl()}/sessions/local-user/traces`, {
       headers: { Authorization: 'Bearer top-secret' },
+    });
+    expect(authorized.status).toBe(200);
+  }, 60000);
+
+  test('required auth mode exits early without an API key even on loopback', async () => {
+    const pluginDir = path.join(__dirname, '../..');
+    const baseConfig = loadConfig();
+    const logs = [];
+    const proc = launchServer({
+      pluginDir,
+      port: 3954,
+      env: {
+        ...baseConfig.serverEnv,
+        CAMOFOX_HOST: '127.0.0.1',
+        CAMOFOX_AUTH_MODE: 'required',
+        CAMOFOX_API_KEY: '',
+      },
+      log: {
+        info: (msg) => logs.push(msg),
+        error: (msg) => logs.push(msg),
+      },
+    });
+
+    try {
+      const closeEvent = once(proc, 'close');
+      let rejectTimeout;
+      const timeoutPromise = new Promise((_, reject) => {
+        rejectTimeout = reject;
+      });
+      const timeoutId = setTimeout(() => rejectTimeout(new Error('server stayed alive')), 5000);
+      const result = await Promise.race([
+        closeEvent,
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId);
+
+      expect(result[0]).not.toBe(0);
+      expect(logs.join('\n')).toContain('CAMOFOX_AUTH_MODE=required');
+    } finally {
+      if (proc.exitCode === null && !proc.killed) {
+        proc.kill('SIGTERM');
+        await once(proc, 'close').catch(() => {});
+      }
+    }
+  }, 15000);
+
+  test('required auth mode enforces bearer auth when an API key is configured', async () => {
+    await startServer(3957, {
+      CAMOFOX_HOST: '127.0.0.1',
+      CAMOFOX_AUTH_MODE: 'required',
+      CAMOFOX_API_KEY: 'required-secret',
+    });
+
+    const unauthorized = await fetch(`${getServerUrl()}/sessions/required-user/traces`);
+    expect(unauthorized.status).toBe(403);
+
+    const authorized = await fetch(`${getServerUrl()}/sessions/required-user/traces`, {
+      headers: { Authorization: 'Bearer required-secret' },
     });
     expect(authorized.status).toBe(200);
   }, 60000);
@@ -71,6 +129,107 @@ describe('security hardening', () => {
 
       expect(result[0]).not.toBe(0);
       expect(logs.join('\n')).toContain('CAMOFOX_API_KEY');
+    } finally {
+      if (proc.exitCode === null && !proc.killed) {
+        proc.kill('SIGTERM');
+        await once(proc, 'close').catch(() => {});
+      }
+    }
+  }, 15000);
+
+  test('disabled auth mode allows network-wide bind without an API key', async () => {
+    await startServer(3955, {
+      CAMOFOX_HOST: '0.0.0.0',
+      CAMOFOX_AUTH_MODE: 'disabled',
+      CAMOFOX_API_KEY: '',
+    });
+
+    const response = await fetch(`${getServerUrl()}/sessions/compat-user/traces`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.traces)).toBe(true);
+    expect(getServerLogs().join('\n')).toContain('CAMOFOX_AUTH_MODE=disabled');
+  }, 60000);
+
+  test('disabled auth mode exits early when an API key is still configured', async () => {
+    const pluginDir = path.join(__dirname, '../..');
+    const baseConfig = loadConfig();
+    const logs = [];
+    const proc = launchServer({
+      pluginDir,
+      port: 3958,
+      env: {
+        ...baseConfig.serverEnv,
+        CAMOFOX_HOST: '0.0.0.0',
+        CAMOFOX_AUTH_MODE: 'disabled',
+        CAMOFOX_API_KEY: 'leftover-secret',
+      },
+      log: {
+        info: (msg) => logs.push(msg),
+        error: (msg) => logs.push(msg),
+      },
+    });
+
+    try {
+      const closeEvent = once(proc, 'close');
+      let rejectTimeout;
+      const timeoutPromise = new Promise((_, reject) => {
+        rejectTimeout = reject;
+      });
+      const timeoutId = setTimeout(() => rejectTimeout(new Error('server stayed alive')), 5000);
+      const result = await Promise.race([
+        closeEvent,
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId);
+
+      expect(result[0]).not.toBe(0);
+      expect(logs.join('\n')).toContain('CAMOFOX_API_KEY must not be set');
+    } finally {
+      if (proc.exitCode === null && !proc.killed) {
+        proc.kill('SIGTERM');
+        await once(proc, 'close').catch(() => {});
+      }
+    }
+  }, 15000);
+
+  test('disabled auth mode rejects explicit private-network access', async () => {
+    const pluginDir = path.join(__dirname, '../..');
+    const baseConfig = loadConfig();
+    const logs = [];
+    const proc = launchServer({
+      pluginDir,
+      port: 3956,
+      env: {
+        ...baseConfig.serverEnv,
+        CAMOFOX_HOST: '0.0.0.0',
+        CAMOFOX_AUTH_MODE: 'disabled',
+        CAMOFOX_API_KEY: '',
+        CAMOFOX_ALLOW_PRIVATE_NETWORK: 'true',
+      },
+      log: {
+        info: (msg) => logs.push(msg),
+        error: (msg) => logs.push(msg),
+      },
+    });
+
+    try {
+      const closeEvent = once(proc, 'close');
+      let rejectTimeout;
+      const timeoutPromise = new Promise((_, reject) => {
+        rejectTimeout = reject;
+      });
+      const timeoutId = setTimeout(() => rejectTimeout(new Error('server stayed alive')), 5000);
+      const result = await Promise.race([
+        closeEvent,
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId);
+
+      expect(result[0]).not.toBe(0);
+      expect(logs.join('\n')).toContain('CAMOFOX_ALLOW_PRIVATE_NETWORK=true is not allowed');
     } finally {
       if (proc.exitCode === null && !proc.killed) {
         proc.kill('SIGTERM');
