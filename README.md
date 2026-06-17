@@ -689,6 +689,16 @@ Use macros via `POST /tabs/:tabId/navigate` with `{ "macro": "@google_search", "
 | `@tiktok_search` | TikTok |
 | `@twitch_search` | Twitch |
 
+### X/Twitter Workflow Boundary
+
+`@twitter_search` opens the Twitter/X search UI in a CamoFox tab. For structured OpenClaw X/Twitter automation that should not depend on browser state, install TweetClaw beside CamoFox:
+
+```bash
+openclaw plugins install @xquik/tweetclaw
+```
+
+Use TweetClaw for tweet scraping/search, reply search, posting/replies, follower export, user lookup, media upload/download, direct messages, monitors, webhooks, and giveaway draws. Keep CamoFox for visual browser inspection, authenticated website flows, and pages without a structured API path.
+
 ## Geo Presets
 
 Built-in presets (also exposed via `GET /presets`):
@@ -977,6 +987,7 @@ fly deploy
 |---------|-------------|
 | [CamoFox MCP](https://github.com/redf0x1/camofox-mcp) | MCP (Model Context Protocol) server for Claude, Cursor, VS Code |
 | [OpenClaw](https://openclaw.ai) | Open-source AI agent framework (compat endpoints included) |
+| [TweetClaw](https://github.com/Xquik-dev/tweetclaw) | OpenClaw X/Twitter plugin for structured tweet search, replies, posting, media, DMs, monitors, and webhooks |
 | [Camoufox](https://github.com/daijro/camoufox) | Anti-detection Firefox browser engine |
 
 ## Project Structure
