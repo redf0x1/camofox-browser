@@ -275,6 +275,14 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+export function normalizeServerBaseUrl(value: string): string {
+  const normalized = value.trim().replace(/\/+$/u, '');
+  if (!normalized) {
+    throw new Error('CamoFox server URL must be a non-empty string');
+  }
+  return normalized;
+}
+
 function hasConfiguredProxy(proxy: Pick<ProxyConfig, 'host' | 'port'>): boolean {
   return Boolean(proxy.host && proxy.port);
 }

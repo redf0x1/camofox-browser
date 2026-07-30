@@ -35,6 +35,18 @@ Use REST API when:
 - You need strict request/response control with explicit `userId` and `tabId`.
 - You need OpenClaw-compatible route shape (`/tabs/open`, `/act`, `/snapshot`).
 
+### Structured X workflow boundary
+
+Use CamoFox when an X workflow requires interactive browser state or visual
+verification. Use the
+[TweetClaw](https://github.com/Xquik-dev/tweetclaw) OpenClaw plugin for
+structured tweet search, profile and reply reads, monitors, and approved X
+account actions. Pass a linked site from TweetClaw to CamoFox only when browser
+inspection is necessary.
+
+Do not send API credentials through CamoFox forms, page scripts, screenshots,
+or logs.
+
 ## 1) Core Workflow (CLI + API dual interface)
 
 Follow this loop for reliable automation:

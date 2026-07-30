@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- Normalized trailing slashes in the OpenClaw plugin server URL so health checks and tool requests do not produce double-slash paths.
+
+### Docs
+- Documented the boundary between browser interaction and structured X workflows.
+
 ## [2.4.7] - 2026-08-13
 
 ### Added
