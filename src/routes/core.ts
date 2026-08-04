@@ -932,6 +932,7 @@ router.post(
 			}
 
 			const { userId, expression, timeout } = req.body;
+			if (!userId) return res.status(400).json({ error: 'userId is required' });
 			if (!expression || typeof expression !== 'string') {
 				return res.status(400).json({ error: 'expression is required and must be a string' });
 			}
@@ -1267,6 +1268,7 @@ router.delete('/tabs/:tabId', async (req: Request<{ tabId: string }, unknown, { 
 		}
 
 		const { userId } = req.body;
+		if (!userId) return res.status(400).json({ error: 'userId is required' });
 		const found = findTabById(req.params.tabId, userId);
 		if (found) {
 			await safePageClose(found.tabState.page);
