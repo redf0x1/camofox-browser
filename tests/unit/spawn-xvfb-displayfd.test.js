@@ -318,8 +318,8 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     proc.emitExit(1, null);
 
     await expect(promise).rejects.toThrow('Xvfb exited early (code=1, signal=null)');
-    // Exactly one SIGTERM for cleanup
-    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+    // No cleanup signals — child already exited, cleanupChild() is a no-op
+    expect(proc._killSignals).toHaveLength(0);
   });
 
   test('rejects when Xvfb exits with a signal', async () => {
@@ -329,7 +329,7 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     proc.emitExit(null, 'SIGSEGV');
 
     await expect(promise).rejects.toThrow('Xvfb exited early (code=null, signal=SIGSEGV)');
-    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+    expect(proc._killSignals).toHaveLength(0);
   });
 
   test('rejects when spawn emits an error', async () => {
@@ -483,6 +483,97 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
 
     // No kill signals should have been sent — child is alive and healthy
     expect(proc._killSignals).toHaveLength(0);
+  });
+
+  test('post-success exit sends no cleanup signals and schedules no new timer', async () => {
+    jest.useFakeTimers();
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    // Successful startup
+    proc.emitFd3Data('77\n');
+    const result = await promise;
+    expect(result.display).toBe(':77');
+
+    // No signals so far
+    expect(proc._killSignals).toHaveLength(0);
+
+    // Child exits normally after startup — no cleanup signals
+    proc.emitExit(0, null);
+
+    // Still no signals — exit handler does not call cleanupChild()
+    expect(proc._killSignals).toHaveLength(0);
+
+    // Advance past the 3s SIGKILL escalation window — no timer should fire
+    jest.advanceTimersByTime(3001);
+    expect(proc._killSignals).toHaveLength(0);
+
+    jest.useRealTimers();
+  });
+
+  test('post-success exit does not create new escalation timer', async () => {
+    jest.useFakeTimers();
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    // Successful startup
+    proc.emitFd3Data('42\n');
+    await promise;
+
+    // Exit after success
+    proc.emitExit(0, null);
+
+    // Advance well beyond any escalation timer
+    jest.advanceTimersByTime(10000);
+    expect(proc._killSignals).toHaveLength(0);
+
+    jest.useRealTimers();
+  });
+
+  test('early exit sends no SIGTERM or SIGKILL even after advancing timers', async () => {
+    jest.useFakeTimers();
+    const promise = spawnXvfb().catch((err) => err);
+    const proc = lastSpawn();
+
+    // Exit before fd3 data arrives
+    proc.emitExit(1, null);
+
+    const rejection = await promise;
+    expect(rejection).toBeInstanceOf(Error);
+    expect(rejection.message).toBe('Xvfb exited early (code=1, signal=null)');
+
+    // No signals at all — child already dead
+    expect(proc._killSignals).toHaveLength(0);
+
+    // Advance past any potential escalation timer
+    jest.advanceTimersByTime(3001);
+    expect(proc._killSignals).toHaveLength(0);
+
+    jest.useRealTimers();
+  });
+
+  test('exit after timeout: timeout sends SIGTERM, exit cancels SIGKILL timer', async () => {
+    jest.useFakeTimers();
+    let rejection = null;
+    const promise = spawnXvfb().catch((err) => { rejection = err; });
+    const proc = lastSpawn();
+
+    // Fire timeout — sends SIGTERM and schedules SIGKILL timer
+    jest.advanceTimersByTime(5001);
+
+    // While timeout is processing, Xvfb exits
+    proc.emitExit(0, null);
+
+    await promise;
+
+    // Timeout sent exactly one SIGTERM (child was alive at that point)
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+
+    // Exit canceled the SIGKILL timer — no SIGKILL even after advancing
+    jest.advanceTimersByTime(3001);
+    expect(proc._killSignals).not.toContain('SIGKILL');
+
+    jest.useRealTimers();
   });
 
   // ── 8. Display reuse after cleanup ────────────────────────────

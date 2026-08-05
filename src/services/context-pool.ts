@@ -153,15 +153,17 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 	});
 
 	// Idempotent child cleanup — safe to call multiple times from any
-	// error path (timeout, spawn error, early exit, fd3 error/close).
+	// error path (timeout, spawn error, fd3 error/close).
 	// SIGTERM first, then SIGKILL after 3s if still alive.
-	// The SIGKILL timer is stored so it can be canceled when the child
-	// exits confirmed (avoids sending SIGKILL to an already-dead process).
+	// When the child has already exited (childExited=true), cleanupChild()
+	// is a no-op — no SIGTERM to a dead process, no new escalation timer.
 	let childCleaned = false;
+	let childExited = false;
 	let sigkillTimer: ReturnType<typeof setTimeout> | null = null;
 	const cleanupChild = () => {
 		if (childCleaned) return;
 		childCleaned = true;
+		if (childExited) return;
 		try {
 			xvfbProcess.kill('SIGTERM');
 		} catch {
@@ -178,9 +180,12 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 		sigkillTimer.unref();
 	};
 
-	// Cancel the SIGKILL escalation when the child exits confirmed.
-	// This prevents sending SIGKILL to an already-dead process.
+	// Mark child as exited and cancel any pending SIGKILL escalation timer.
+	// Called from the exit handler and the error handler (error often
+	// precedes or accompanies exit). After this, cleanupChild() will not
+	// send signals to the already-dead process.
 	const onChildExit = () => {
+		childExited = true;
 		if (sigkillTimer) {
 			clearTimeout(sigkillTimer);
 			sigkillTimer = null;
@@ -235,7 +240,6 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 
 		xvfbProcess.once('exit', (code, signal) => {
 			onChildExit();
-			cleanupChild();
 			finalize(() => reject(new Error(`Xvfb exited early (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
 		});
 
