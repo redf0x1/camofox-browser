@@ -8,14 +8,18 @@
  * Coverage:
  * 1. Concurrent display uniqueness — parallel calls get distinct displays
  * 2. Split fd3 chunks — display number delivered across multiple writes
- * 3. Early exit / spawn error — rejects with proper error
- * 4. Timeout child termination — Xvfb child is killed on timeout
- * 5. Idempotent cleanup — cleanupChild() safe to call multiple times
- * 6. Display reuse after cleanup — a new spawn gets a fresh display
+ * 3. Multi-record same-chunk — blank, malformed, CRLF, multiple records
+ * 4. Early exit / spawn error / fd3 error / fd3 close — rejects with proper error
+ * 5. Timeout child termination — Xvfb child is killed on timeout
+ * 6. Idempotent cleanup — exactly one SIGTERM, no SIGKILL after observed exit
+ * 7. No signals after successful startup
+ * 8. Display reuse after cleanup — a new spawn gets a fresh display
+ * 9. Native Xvfb contract (Linux-only, gated on which Xvfb)
  */
 
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
+const { execSync } = require('node:child_process');
 
 // ── Mock infrastructure ────────────────────────────────────────────
 //
@@ -45,14 +49,12 @@ class MockChildProcess extends EventEmitter {
       new PassThrough(),
     ];
     this._killSignals = [];
+    this._exited = false;
   }
 
   kill(signal) {
     this._killSignals.push(signal);
-    if (this.killed) return false;
-    // First kill is SIGTERM; process doesn't actually die until we
-    // emit 'exit' (simulated by the test).
-    // For cleanup tests: after SIGKILL we mark as killed.
+    if (this._exited) return false;
     if (signal === 'SIGKILL') {
       this.killed = true;
     }
@@ -68,7 +70,17 @@ class MockChildProcess extends EventEmitter {
     this.stdio[3].end();
   }
 
+  emitFd3Error(err) {
+    this.stdio[3].destroy(err);
+  }
+
+  emitFd3Close() {
+    // Simulate pipe close without end — destroy the stream
+    this.stdio[3].destroy();
+  }
+
   emitExit(code, signal) {
+    this._exited = true;
     this.exitCode = code;
     this.signalCode = signal;
     this.emit('exit', code, signal);
@@ -87,6 +99,8 @@ jest.mock('node:child_process', () => ({
     mockSpawnedProcesses.push(proc);
     return proc;
   }),
+  // Preserve execSync for the native Xvfb detection helper
+  execSync: jest.requireActual('node:child_process').execSync,
 }));
 
 jest.mock('camoufox-js/dist/pkgman.js', () => ({
@@ -155,21 +169,14 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
   });
 
   afterEach(() => {
-    // Clean up any lingering fake processes
     for (const proc of mockSpawnedProcesses) {
       proc.removeAllListeners();
     }
   });
 
-  // Helper to get the most recently spawned process
   const lastSpawn = () => mockSpawnedProcesses[mockSpawnedProcesses.length - 1];
 
   // ── 1. Concurrent display uniqueness ───────────────────────────
-  //
-  // Two parallel spawnXvfb() calls must get distinct display numbers.
-  // With -displayfd, Xvfb itself picks the display, so each call
-  // gets whatever Xvfb assigns. We simulate two Xvfb instances
-  // writing different display numbers to fd3.
 
   test('concurrent calls get distinct display numbers', async () => {
     const promise1 = spawnXvfb();
@@ -188,20 +195,14 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
   });
 
   // ── 2. Split fd3 chunks ────────────────────────────────────────
-  //
-  // Xvfb might write the display number in multiple chunks (e.g.
-  // "9" then "9\n"). The parser must buffer until the newline and
-  // only then accept the complete record.
 
   test('handles split fd3 chunks across multiple writes', async () => {
     const promise = spawnXvfb();
     const proc = lastSpawn();
 
-    // Deliver "9" then "9\n" — the parser must NOT accept "9" alone
     proc.emitFd3Data('9');
     await new Promise((r) => setTimeout(r, 10));
 
-    // Promise should still be pending
     let resolved = false;
     await Promise.race([
       promise.then(() => { resolved = true; }),
@@ -209,7 +210,6 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     ]);
     expect(resolved).toBe(false);
 
-    // Now deliver the rest
     proc.emitFd3Data('9\n');
 
     const result = await promise;
@@ -220,7 +220,6 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     const promise = spawnXvfb();
     const proc = lastSpawn();
 
-    // "1" then "0" then "2\n" — must not accept "1" or "10" prematurely
     proc.emitFd3Data('1');
     await new Promise((r) => setTimeout(r, 10));
     proc.emitFd3Data('0');
@@ -238,20 +237,79 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     expect(result.display).toBe(':102');
   });
 
-  test('ignores non-digit content before the display number', async () => {
+  // ── 3. Multi-record same-chunk ────────────────────────────────
+  //
+  // A single data event may contain multiple newline-delimited records.
+  // The parser must process ALL complete records in the buffer, skip
+  // blank/malformed lines, and resolve on the first valid display number.
+
+  test('processes blank leading record then valid display in same chunk', async () => {
     const promise = spawnXvfb();
     const proc = lastSpawn();
 
-    // Xvfb might emit a leading newline or whitespace
-    proc.emitFd3Data('\n');
-    await new Promise((r) => setTimeout(r, 10));
-    proc.emitFd3Data('44\n');
+    // "\n44\n" — blank line then valid display, all in one write
+    proc.emitFd3Data('\n44\n');
 
     const result = await promise;
     expect(result.display).toBe(':44');
   });
 
-  // ── 3. Early exit / spawn error ────────────────────────────────
+  test('processes malformed record then valid display in same chunk', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    // "invalid\n44\n" — malformed line then valid display
+    proc.emitFd3Data('invalid\n44\n');
+
+    const result = await promise;
+    expect(result.display).toBe(':44');
+  });
+
+  test('processes multiple valid records — resolves on first', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    // "99\n100\n" — two valid records, should resolve on the first
+    proc.emitFd3Data('99\n100\n');
+
+    const result = await promise;
+    expect(result.display).toBe(':99');
+  });
+
+  test('handles CRLF line endings', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    // "44\r\n" — CRLF instead of LF
+    proc.emitFd3Data('44\r\n');
+
+    const result = await promise;
+    expect(result.display).toBe(':44');
+  });
+
+  test('handles EOF without newline — rejects after timeout', async () => {
+    jest.useFakeTimers();
+    let rejection = null;
+    const promise = spawnXvfb().catch((err) => { rejection = err; });
+    const proc = lastSpawn();
+
+    // Write data without a newline — no complete record
+    proc.emitFd3Data('99');
+
+    // Fast-forward past timeout — no data event will complete the record
+    jest.advanceTimersByTime(5001);
+    await promise;
+
+    expect(rejection).toBeInstanceOf(Error);
+    expect(rejection.message).toBe('Xvfb start timeout');
+
+    // Should have sent exactly one SIGTERM for cleanup
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+
+    jest.useRealTimers();
+  });
+
+  // ── 4. Early exit / spawn error / fd3 error / fd3 close ────────
 
   test('rejects when Xvfb exits early with non-zero code', async () => {
     const promise = spawnXvfb();
@@ -260,6 +318,8 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     proc.emitExit(1, null);
 
     await expect(promise).rejects.toThrow('Xvfb exited early (code=1, signal=null)');
+    // Exactly one SIGTERM for cleanup
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
   });
 
   test('rejects when Xvfb exits with a signal', async () => {
@@ -269,6 +329,7 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     proc.emitExit(null, 'SIGSEGV');
 
     await expect(promise).rejects.toThrow('Xvfb exited early (code=null, signal=SIGSEGV)');
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
   });
 
   test('rejects when spawn emits an error', async () => {
@@ -278,6 +339,18 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     proc.emitError(new Error('spawn EACCES'));
 
     await expect(promise).rejects.toThrow('spawn EACCES');
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+  });
+
+  test('rejects when fd3 stream emits an error', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    proc.emitFd3Error(new Error('EPIPE'));
+
+    await expect(promise).rejects.toThrow('fd3 stream error: EPIPE');
+    // Exactly one SIGTERM for cleanup
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
   });
 
   test('rejects when fd3 closes before writing display number', async () => {
@@ -287,44 +360,50 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     proc.emitFd3End();
 
     await expect(promise).rejects.toThrow('fd3 closed before writing display number');
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
   });
 
-  // ── 4. Timeout child termination ───────────────────────────────
-  //
-  // When the 5s timeout fires, the Xvfb child must be killed
-  // (SIGTERM, then SIGKILL after 3s). Previously the timeout
-  // rejected without terminating the child, leaking the process.
+  test('rejects when fd3 pipe closes without end event', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
 
-  test('terminates Xvfb child on timeout', async () => {
+    proc.emitFd3Close();
+
+    // Should reject with either 'closed' or 'closed before writing'
+    await expect(promise).rejects.toThrow(/fd3 stream (closed|closed before writing) display number/);
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+  });
+
+  // ── 5. Timeout child termination ───────────────────────────────
+
+  test('terminates Xvfb child on timeout with exactly one SIGTERM', async () => {
     jest.useFakeTimers();
     let rejection = null;
     const promise = spawnXvfb().catch((err) => { rejection = err; });
     const proc = lastSpawn();
 
-    // Fast-forward past the 5s timeout
     jest.advanceTimersByTime(5001);
     await promise;
 
     expect(rejection).toBeInstanceOf(Error);
     expect(rejection.message).toBe('Xvfb start timeout');
 
-    // SIGTERM should have been sent
-    expect(proc._killSignals).toContain('SIGTERM');
+    // Exactly one SIGTERM — not zero, not two
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
 
-    // Fast-forward past the 3s SIGKILL timer
+    // SIGKILL should NOT have been sent yet (child hasn't exited)
+    expect(proc._killSignals).not.toContain('SIGKILL');
+
+    // Fast-forward past the 3s SIGKILL timer — child still alive
     jest.advanceTimersByTime(3001);
-    expect(proc._killSignals).toContain('SIGKILL');
+    expect(proc._killSignals.filter((s) => s === 'SIGKILL')).toHaveLength(1);
 
     jest.useRealTimers();
   });
 
-  // ── 5. Idempotent cleanup ──────────────────────────────────────
-  //
-  // cleanupChild() must be safe to call multiple times from different
-  // error paths. If both the timeout and the exit handler fire,
-  // the child should only receive one set of kill signals.
+  // ── 6. Idempotent cleanup with exact assertions ─────────────────
 
-  test('cleanup is idempotent — exit after timeout does not double-kill', async () => {
+  test('cleanup is idempotent — exit after timeout: exactly one SIGTERM, no SIGKILL after exit', async () => {
     jest.useFakeTimers();
     let rejection = null;
     const promise = spawnXvfb().catch((err) => { rejection = err; });
@@ -338,37 +417,77 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
 
     await promise;
 
-    // SIGTERM should appear at most once (cleanupChild is idempotent)
-    const sigtermCount = proc._killSignals.filter((s) => s === 'SIGTERM').length;
-    expect(sigtermCount).toBeLessThanOrEqual(1);
+    // Exactly one SIGTERM (cleanupChild is idempotent)
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+
+    // No SIGKILL — the escalation timer was canceled by onChildExit
+    expect(proc._killSignals).not.toContain('SIGKILL');
+
+    // Advance past the SIGKILL timer — should NOT fire
+    jest.advanceTimersByTime(3001);
+    expect(proc._killSignals).not.toContain('SIGKILL');
 
     jest.useRealTimers();
   });
 
-  test('cleanup is idempotent — error then exit does not double-kill', async () => {
-    const promise = spawnXvfb();
+  test('cleanup is idempotent — error then exit: exactly one SIGTERM, no SIGKILL after exit', async () => {
+    const promise = spawnXvfb().catch(() => {});
     const proc = lastSpawn();
 
     proc.emitError(new Error('spawn ENOENT'));
     proc.emitExit(1, null);
 
-    try {
-      await promise;
-    } catch {
-      // expected
-    }
+    await promise;
 
-    const sigtermCount = proc._killSignals.filter((s) => s === 'SIGTERM').length;
-    expect(sigtermCount).toBeLessThanOrEqual(1);
+    // Exactly one SIGTERM
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+    // No SIGKILL — timer was canceled by exit
+    expect(proc._killSignals).not.toContain('SIGKILL');
   });
 
-  // ── 6. Display reuse after cleanup ─────────────────────────────
-  //
-  // After a failed spawnXvfb (e.g. timeout), a subsequent call
-  // should be able to get a display from a new Xvfb process.
+  test('no duplicate escalation — only one SIGKILL when child stays alive', async () => {
+    jest.useFakeTimers();
+    let rejection = null;
+    const promise = spawnXvfb().catch((err) => { rejection = err; });
+    const proc = lastSpawn();
+
+    // Fire timeout
+    jest.advanceTimersByTime(5001);
+    await promise;
+
+    // One SIGTERM
+    expect(proc._killSignals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
+
+    // Advance past SIGKILL timer
+    jest.advanceTimersByTime(3001);
+    // Exactly one SIGKILL
+    expect(proc._killSignals.filter((s) => s === 'SIGKILL')).toHaveLength(1);
+
+    // Advance further — no additional SIGKILL
+    jest.advanceTimersByTime(3001);
+    expect(proc._killSignals.filter((s) => s === 'SIGKILL')).toHaveLength(1);
+
+    jest.useRealTimers();
+  });
+
+  // ── 7. No signals after successful startup ─────────────────────
+
+  test('no kill signals sent after successful startup', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    proc.emitFd3Data('77\n');
+
+    const result = await promise;
+    expect(result.display).toBe(':77');
+
+    // No kill signals should have been sent — child is alive and healthy
+    expect(proc._killSignals).toHaveLength(0);
+  });
+
+  // ── 8. Display reuse after cleanup ────────────────────────────
 
   test('subsequent call succeeds after a failed spawn', async () => {
-    // First call fails (timeout)
     jest.useFakeTimers();
     const promise1 = spawnXvfb().catch((err) => err);
     jest.advanceTimersByTime(5001);
@@ -377,7 +496,6 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     expect(rejection.message).toBe('Xvfb start timeout');
     jest.useRealTimers();
 
-    // Second call succeeds
     const promise2 = spawnXvfb();
     expect(mockSpawnedProcesses).toHaveLength(2);
     mockSpawnedProcesses[1].emitFd3Data('55\n');
@@ -386,7 +504,7 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     expect(result.display).toBe(':55');
   });
 
-  // ── 7. Successful spawn returns the process ───────────────────
+  // ── 9. Successful spawn returns the process ────────────────────
 
   test('returns the ChildProcess on success', async () => {
     const promise = spawnXvfb();
@@ -398,4 +516,85 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     expect(result.display).toBe(':77');
     expect(result.process).toBe(proc);
   });
+});
+
+// ── Native Xvfb contract tests (Linux-only) ─────────────────────────
+//
+// These tests run only when Xvfb is available on the system. They verify
+// that real Xvfb -displayfd allocates unique display numbers across
+// concurrent processes — complementing the mock-based tests above.
+//
+// The repo's CI runs on ubuntu-latest which has Xvfb pre-installed.
+
+function hasXvfb() {
+  try {
+    execSync('which Xvfb', { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const nativeDescribe = hasXvfb() ? describe : describe.skip;
+
+nativeDescribe('spawnXvfb native Xvfb contract (Linux-only)', () => {
+
+  test('native Xvfb allocates unique display numbers across concurrent processes', async () => {
+    // Use the REAL spawn — not the mock. jest.mock replaces the module
+    // globally, so we need jest.requireActual to get the real implementation.
+    const { spawn: realSpawnFn } = jest.requireActual('node:child_process');
+
+    const spawnReal = () => new Promise((resolve, reject) => {
+      const proc = realSpawnFn('Xvfb', [
+        '-displayfd', '3',
+        '-screen', '0', '1280x720x24',
+        '-ac', '-nolisten', 'tcp',
+      ], {
+        stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+      });
+
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch {}
+        reject(new Error('Xvfb start timeout'));
+      }, 10000);
+
+      const fd3 = proc.stdio[3];
+      let buf = '';
+      fd3.on('data', (chunk) => {
+        buf += chunk.toString();
+        const idx = buf.indexOf('\n');
+        if (idx !== -1) {
+          const line = buf.slice(0, idx).trim();
+          const match = line.match(/^(\d+)$/);
+          if (match) {
+            clearTimeout(timeout);
+            resolve({ display: `:${match[1]}`, process: proc });
+          }
+        }
+      });
+
+      proc.once('error', (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+
+      proc.once('exit', (code, signal) => {
+        clearTimeout(timeout);
+        reject(new Error(`Xvfb exited early (code=${code}, signal=${signal})`));
+      });
+    });
+
+    // Spawn 3 concurrent Xvfb processes
+    const results = await Promise.all([spawnReal(), spawnReal(), spawnReal()]);
+
+    // All should have distinct displays
+    const displays = results.map((r) => r.display);
+    const unique = new Set(displays);
+    expect(unique.size).toBe(3);
+
+    // Cleanup
+    for (const r of results) {
+      try { r.process.kill('SIGTERM'); } catch {}
+    }
+  }, 15000);
 });

@@ -153,9 +153,12 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 	});
 
 	// Idempotent child cleanup — safe to call multiple times from any
-	// error path (timeout, spawn error, early exit, or normal teardown).
+	// error path (timeout, spawn error, early exit, fd3 error/close).
 	// SIGTERM first, then SIGKILL after 3s if still alive.
+	// The SIGKILL timer is stored so it can be canceled when the child
+	// exits confirmed (avoids sending SIGKILL to an already-dead process).
 	let childCleaned = false;
+	let sigkillTimer: ReturnType<typeof setTimeout> | null = null;
 	const cleanupChild = () => {
 		if (childCleaned) return;
 		childCleaned = true;
@@ -164,13 +167,24 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 		} catch {
 			// already dead
 		}
-		setTimeout(() => {
+		sigkillTimer = setTimeout(() => {
+			sigkillTimer = null;
 			try {
 				xvfbProcess.kill('SIGKILL');
 			} catch {
 				// already dead
 			}
-		}, 3000).unref();
+		}, 3000);
+		sigkillTimer.unref();
+	};
+
+	// Cancel the SIGKILL escalation when the child exits confirmed.
+	// This prevents sending SIGKILL to an already-dead process.
+	const onChildExit = () => {
+		if (sigkillTimer) {
+			clearTimeout(sigkillTimer);
+			sigkillTimer = null;
+		}
 	};
 
 	const display = await new Promise<string>((resolve, reject) => {
@@ -192,26 +206,35 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 
 		fd3.on('data', (chunk: Buffer | string) => {
 			buf += chunk.toString();
-			// Parse complete newline-delimited records. Xvfb writes
-			// "<display>\n" to fd 3. We wait for the newline before
-			// accepting the display number, so chunked writes
-			// (e.g. "9" then "9\n") are handled correctly.
-			const newlineIdx = buf.indexOf('\n');
-			if (newlineIdx === -1) return;
-			const line = buf.slice(0, newlineIdx).trim();
-			buf = buf.slice(newlineIdx + 1);
-			const match = line.match(/^(\d+)$/);
-			if (match) {
-				finalize(() => resolve(`:${match[1]}`));
+			// Process ALL complete newline-delimited records currently in
+			// the buffer. A single data event may contain multiple records
+			// (e.g. "\n44\n" or "invalid\n44\n"). We loop through each
+			// complete record, skip malformed/blank lines, and resolve on
+			// the first valid display number. Any remaining incomplete data
+			// stays in buf for the next data event.
+			for (;;) {
+				const newlineIdx = buf.indexOf('\n');
+				if (newlineIdx === -1) break;
+				const line = buf.slice(0, newlineIdx).trim();
+				buf = buf.slice(newlineIdx + 1);
+				// Skip blank or malformed records — Xvfb may emit leading
+				// newlines or debug output before the display number.
+				const match = line.match(/^(\d+)$/);
+				if (match) {
+					finalize(() => resolve(`:${match[1]}`));
+					return;
+				}
 			}
 		});
 
 		xvfbProcess.once('error', (err) => {
 			cleanupChild();
+			onChildExit();
 			finalize(() => reject(err));
 		});
 
 		xvfbProcess.once('exit', (code, signal) => {
+			onChildExit();
 			cleanupChild();
 			finalize(() => reject(new Error(`Xvfb exited early (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
 		});
@@ -221,6 +244,22 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 			if (!settled) {
 				cleanupChild();
 				finalize(() => reject(new Error('Xvfb fd3 closed before writing display number')));
+			}
+		});
+
+		// fd3 stream error — route through the same finalizer to avoid
+		// unhandled stream errors.
+		fd3.once('error', (err) => {
+			cleanupChild();
+			finalize(() => reject(new Error(`Xvfb fd3 stream error: ${err instanceof Error ? err.message : String(err)}`)));
+		});
+
+		// fd3 closed without end event — the pipe is fully destroyed.
+		// Reject immediately rather than waiting for the 5s timeout.
+		fd3.once('close', () => {
+			if (!settled) {
+				cleanupChild();
+				finalize(() => reject(new Error('Xvfb fd3 stream closed before writing display number')));
 			}
 		});
 	});
