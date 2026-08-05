@@ -139,6 +139,11 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 	// Xvfb writes "<display>\n" to fd 3 (e.g. "99\n"), which we read to
 	// determine the assigned display. This is the same approach used by
 	// camoufox-js's VirtualDisplay class (apify/camoufox-js#273).
+	//
+	// The fd3 output is line-delimited. We buffer until a newline is
+	// received and parse the complete record, rather than matching
+	// digits greedily — chunked writes could deliver a partial number
+	// (e.g. "9" then "9\n") that would be accepted prematurely.
 	const xvfbProcess = spawn('Xvfb', [
 		'-displayfd', '3',
 		'-screen', '0', resolution,
@@ -146,6 +151,27 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 	], {
 		stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
 	});
+
+	// Idempotent child cleanup — safe to call multiple times from any
+	// error path (timeout, spawn error, early exit, or normal teardown).
+	// SIGTERM first, then SIGKILL after 3s if still alive.
+	let childCleaned = false;
+	const cleanupChild = () => {
+		if (childCleaned) return;
+		childCleaned = true;
+		try {
+			xvfbProcess.kill('SIGTERM');
+		} catch {
+			// already dead
+		}
+		setTimeout(() => {
+			try {
+				xvfbProcess.kill('SIGKILL');
+			} catch {
+				// already dead
+			}
+		}, 3000).unref();
+	};
 
 	const display = await new Promise<string>((resolve, reject) => {
 		let settled = false;
@@ -157,6 +183,7 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 		};
 
 		const timeout = setTimeout(() => {
+			cleanupChild();
 			finalize(() => reject(new Error('Xvfb start timeout')));
 		}, 5000);
 
@@ -165,23 +192,46 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 
 		fd3.on('data', (chunk: Buffer | string) => {
 			buf += chunk.toString();
-			const match = buf.match(/^\s*(\d+)\s*$/);
+			// Parse complete newline-delimited records. Xvfb writes
+			// "<display>\n" to fd 3. We wait for the newline before
+			// accepting the display number, so chunked writes
+			// (e.g. "9" then "9\n") are handled correctly.
+			const newlineIdx = buf.indexOf('\n');
+			if (newlineIdx === -1) return;
+			const line = buf.slice(0, newlineIdx).trim();
+			buf = buf.slice(newlineIdx + 1);
+			const match = line.match(/^(\d+)$/);
 			if (match) {
 				finalize(() => resolve(`:${match[1]}`));
 			}
 		});
 
 		xvfbProcess.once('error', (err) => {
+			cleanupChild();
 			finalize(() => reject(err));
 		});
 
 		xvfbProcess.once('exit', (code, signal) => {
+			cleanupChild();
 			finalize(() => reject(new Error(`Xvfb exited early (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
+		});
+
+		// fd3 may close before data arrives (e.g. Xvfb exits immediately).
+		fd3.once('end', () => {
+			if (!settled) {
+				cleanupChild();
+				finalize(() => reject(new Error('Xvfb fd3 closed before writing display number')));
+			}
 		});
 	});
 
 	return { display, process: xvfbProcess };
 }
+
+// Test-only export of spawnXvfb for unit testing the fd3 parser and
+// child cleanup logic without a real Xvfb binary. Not part of the
+// public API; consumed by tests/unit/spawn-xvfb-displayfd.test.js.
+export const spawnXvfbForTests = spawnXvfb;
 
 export class ContextPool {
 	private pool: Map<string, PoolEntry> = new Map();
