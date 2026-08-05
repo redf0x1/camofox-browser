@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { type ChildProcess, spawn } from 'node:child_process';
+import { type Readable } from 'node:stream';
 
 import { launchOptions } from 'camoufox-js';
 import { generateFingerprint } from 'camoufox-js/dist/fingerprints.js';
@@ -129,55 +130,53 @@ function hasUsableLinuxDisplay(): boolean {
 }
 
 async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display: string; process: ChildProcess }> {
-	let displayNum = 99;
-	while (fs.existsSync(`/tmp/.X${displayNum}-lock`)) {
-		displayNum++;
-	}
-
-	const display = `:${displayNum}`;
+	// Use -displayfd so Xvfb itself picks a free display number atomically.
+	// This avoids the userspace race condition where multiple concurrent
+	// spawnXvfb() calls all see the same absence of a lock file and pick
+	// the same display number — only the first to create the lock succeeds,
+	// the others exit with code 1.
+	//
+	// Xvfb writes "<display>\n" to fd 3 (e.g. "99\n"), which we read to
+	// determine the assigned display. This is the same approach used by
+	// camoufox-js's VirtualDisplay class (apify/camoufox-js#273).
 	const xvfbProcess = spawn('Xvfb', [
-		display,
-		'-screen',
-		'0',
-		resolution,
-		'-ac',
-		'-nolisten',
-		'tcp',
-	], { stdio: 'pipe' });
+		'-displayfd', '3',
+		'-screen', '0', resolution,
+		'-ac', '-nolisten', 'tcp',
+	], {
+		stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+	});
 
-	await new Promise<void>((resolve, reject) => {
+	const display = await new Promise<string>((resolve, reject) => {
 		let settled = false;
-		const finalizeResolve = () => {
+		const finalize = (fn: () => void) => {
 			if (settled) return;
 			settled = true;
-			clearInterval(check);
 			clearTimeout(timeout);
-			resolve();
-		};
-		const finalizeReject = (err: Error) => {
-			if (settled) return;
-			settled = true;
-			clearInterval(check);
-			clearTimeout(timeout);
-			reject(err);
+			fn();
 		};
 
 		const timeout = setTimeout(() => {
-			finalizeReject(new Error('Xvfb start timeout'));
+			finalize(() => reject(new Error('Xvfb start timeout')));
 		}, 5000);
 
-		const check = setInterval(() => {
-			if (fs.existsSync(`/tmp/.X${displayNum}-lock`)) {
-				finalizeResolve();
+		const fd3 = xvfbProcess.stdio[3] as Readable;
+		let buf = '';
+
+		fd3.on('data', (chunk: Buffer | string) => {
+			buf += chunk.toString();
+			const match = buf.match(/^\s*(\d+)\s*$/);
+			if (match) {
+				finalize(() => resolve(`:${match[1]}`));
 			}
-		}, 100);
+		});
 
 		xvfbProcess.once('error', (err) => {
-			finalizeReject(err);
+			finalize(() => reject(err));
 		});
 
 		xvfbProcess.once('exit', (code, signal) => {
-			finalizeReject(new Error(`Xvfb exited early (code=${code ?? 'null'}, signal=${signal ?? 'null'})`));
+			finalize(() => reject(new Error(`Xvfb exited early (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
 		});
 	});
 
