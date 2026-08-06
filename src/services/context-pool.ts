@@ -252,10 +252,14 @@ async function spawnXvfb(resolution: string = '1920x1080x24'): Promise<{ display
 		});
 
 		// fd3 stream error — route through the same finalizer to avoid
-		// unhandled stream errors.
+		// unhandled stream errors. Guard with `!settled` so that a late
+		// fd3 error after successful startup does not terminate a healthy
+		// Xvfb child (same guard as the end/close handlers).
 		fd3.once('error', (err) => {
-			cleanupChild();
-			finalize(() => reject(new Error(`Xvfb fd3 stream error: ${err instanceof Error ? err.message : String(err)}`)));
+			if (!settled) {
+				cleanupChild();
+				finalize(() => reject(new Error(`Xvfb fd3 stream error: ${err instanceof Error ? err.message : String(err)}`)));
+			}
 		});
 
 		// fd3 closed without end event — the pipe is fully destroyed.

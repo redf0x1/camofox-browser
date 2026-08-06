@@ -530,6 +530,27 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
     jest.useRealTimers();
   });
 
+  test('late fd3 error after successful startup does not terminate healthy child', async () => {
+    const promise = spawnXvfb();
+    const proc = lastSpawn();
+
+    // Successful startup
+    proc.emitFd3Data('99\n');
+    const result = await promise;
+    expect(result.display).toBe(':99');
+
+    // No signals so far
+    expect(proc._killSignals).toHaveLength(0);
+
+    // A late fd3 error arrives after startup has settled.
+    // The error handler must NOT call cleanupChild() — the Xvfb child
+    // is healthy and running.
+    proc.emitFd3Error(new Error('late EPIPE'));
+
+    // No kill signals should have been sent — child is still alive
+    expect(proc._killSignals).toHaveLength(0);
+  });
+
   test('early exit sends no SIGTERM or SIGKILL even after advancing timers', async () => {
     jest.useFakeTimers();
     const promise = spawnXvfb().catch((err) => err);
