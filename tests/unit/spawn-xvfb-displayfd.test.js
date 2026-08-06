@@ -531,6 +531,7 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
   });
 
   test('late fd3 error after successful startup does not terminate healthy child', async () => {
+    jest.useFakeTimers();
     const promise = spawnXvfb();
     const proc = lastSpawn();
 
@@ -549,6 +550,14 @@ describe('spawnXvfb -displayfd atomic display allocation', () => {
 
     // No kill signals should have been sent — child is still alive
     expect(proc._killSignals).toHaveLength(0);
+
+    // Advance well beyond the 3s SIGKILL escalation window to prove the
+    // late fd3 error handler did NOT schedule a delayed cleanup timer
+    // (a SIGKILL would fire here if it had).
+    jest.advanceTimersByTime(3001);
+    expect(proc._killSignals.filter((s) => s === 'SIGKILL')).toHaveLength(0);
+
+    jest.useRealTimers();
   });
 
   test('early exit sends no SIGTERM or SIGKILL even after advancing timers', async () => {
@@ -650,63 +659,69 @@ function hasXvfb() {
 const nativeDescribe = hasXvfb() ? describe : describe.skip;
 
 nativeDescribe('spawnXvfb native Xvfb contract (Linux-only)', () => {
+  // The mock-based describe() above mocks node:child_process globally, so to
+  // exercise the REAL production spawnXvfb() against a real Xvfb binary we
+  // must drop that mock, reset the module registry, and re-load the production
+  // module fresh — it will then bind the real child_process.spawn. The helper's
+  // fd3 parser, settlement guard, timeout timer, and cleanup logic all run
+  // unmodified against the real Xvfb protocol.
+  let spawnXvfbReal;
 
-  test('native Xvfb allocates unique display numbers across concurrent processes', async () => {
-    // Use the REAL spawn — not the mock. jest.mock replaces the module
-    // globally, so we need jest.requireActual to get the real implementation.
-    const { spawn: realSpawnFn } = jest.requireActual('node:child_process');
+  beforeAll(() => {
+    jest.unmock('node:child_process');
+    jest.resetModules();
+    // eslint-disable-next-line global-require
+    spawnXvfbReal = require('../../dist/src/services/context-pool').spawnXvfbForTests;
+  });
 
-    const spawnReal = () => new Promise((resolve, reject) => {
-      const proc = realSpawnFn('Xvfb', [
-        '-displayfd', '3',
-        '-screen', '0', '1280x720x24',
-        '-ac', '-nolisten', 'tcp',
-      ], {
-        stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-      });
-
-      const timeout = setTimeout(() => {
-        try { proc.kill('SIGTERM'); } catch {}
-        reject(new Error('Xvfb start timeout'));
-      }, 10000);
-
-      const fd3 = proc.stdio[3];
-      let buf = '';
-      fd3.on('data', (chunk) => {
-        buf += chunk.toString();
-        const idx = buf.indexOf('\n');
-        if (idx !== -1) {
-          const line = buf.slice(0, idx).trim();
-          const match = line.match(/^(\d+)$/);
-          if (match) {
-            clearTimeout(timeout);
-            resolve({ display: `:${match[1]}`, process: proc });
-          }
+  // Terminate and reap every started Xvfb child. Safe to call repeatedly.
+  const killAll = (children) => {
+    for (const proc of children) {
+      try {
+        // Only signal children that have not already exited.
+        if (proc.exitCode === null && proc.signalCode === null) {
+          proc.kill('SIGTERM');
         }
+      } catch {
+        // already dead
+      }
+    }
+  };
+
+  test('production spawnXvfb allocates unique display numbers across concurrent processes', async () => {
+    // Track each child as its promise resolves so that, even if one of the
+    // three spawns rejects mid-flight, already-started siblings are still
+    // reaped in the finally block (the production helper itself cleans up any
+    // child whose startup failed via its own cleanup logic).
+    const children = [];
+    const spawnTracked = (resolution) =>
+      spawnXvfbReal(resolution).then((r) => {
+        children.push(r.process);
+        return r;
       });
 
-      proc.once('error', (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
+    try {
+      const results = await Promise.all([
+        spawnTracked('1280x720x24'),
+        spawnTracked('1280x720x24'),
+        spawnTracked('1280x720x24'),
+      ]);
 
-      proc.once('exit', (code, signal) => {
-        clearTimeout(timeout);
-        reject(new Error(`Xvfb exited early (code=${code}, signal=${signal})`));
-      });
-    });
+      // All three should have distinct display numbers allocated atomically
+      // by Xvfb's -displayfd, parsed by the production helper.
+      const displays = results.map((r) => r.display);
+      const unique = new Set(displays);
+      expect(unique.size).toBe(3);
 
-    // Spawn 3 concurrent Xvfb processes
-    const results = await Promise.all([spawnReal(), spawnReal(), spawnReal()]);
-
-    // All should have distinct displays
-    const displays = results.map((r) => r.display);
-    const unique = new Set(displays);
-    expect(unique.size).toBe(3);
-
-    // Cleanup
-    for (const r of results) {
-      try { r.process.kill('SIGTERM'); } catch {}
+      // Every child is still alive after successful startup (no cleanup
+      // signal sent by the production helper).
+      for (const r of results) {
+        expect(r.process.exitCode).toBe(null);
+      }
+    } finally {
+      // Always terminate and reap every started child — never leak Xvfb
+      // processes, even if one of the concurrent spawns rejected.
+      killAll(children);
     }
   }, 15000);
 });
