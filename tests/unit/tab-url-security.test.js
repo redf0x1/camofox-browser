@@ -14,6 +14,7 @@ describe('validateUrl() network safety', () => {
   let scrollTab;
   let typeTab;
   let waitForPageReady;
+  let withBlockedNavigationTracking;
   let lookupMock;
   const originalHost = process.env.CAMOFOX_HOST;
   const originalApiKey = process.env.CAMOFOX_API_KEY;
@@ -24,7 +25,7 @@ describe('validateUrl() network safety', () => {
     process.env.CAMOFOX_API_KEY = 'test-key';
     ({ lookup: lookupMock } = require('node:dns/promises'));
     lookupMock.mockReset();
-    ({ validateUrl, validateNavigationUrl, navigateWithSafetyGuard, createTabState, clickTab, evaluateTab, pressTab, scrollElementTab, scrollTab, typeTab, waitForPageReady } =
+    ({ validateUrl, validateNavigationUrl, navigateWithSafetyGuard, createTabState, clickTab, evaluateTab, pressTab, scrollElementTab, scrollTab, typeTab, waitForPageReady, withBlockedNavigationTracking } =
       require('../../dist/src/services/tab'));
   });
 
@@ -405,6 +406,131 @@ describe('validateUrl() network safety', () => {
       await jest.advanceTimersByTimeAsync(700);
 
       await actionExpectation;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('keeps the action token active for navigation queued after the action promise settles', async () => {
+    let routeHandler;
+    const trackerState = {
+      activeToken: 0,
+      pendingCounts: new Map(),
+    };
+    const blockedRoute = {
+      request: () => ({
+        url: () => 'http://169.254.169.254/latest/meta-data',
+        isNavigationRequest: () => true,
+        frame: () => ({ page: () => page }),
+      }),
+      continue: jest.fn().mockResolvedValue(undefined),
+      abort: jest.fn().mockResolvedValue(undefined),
+    };
+    const context = {
+      route: jest.fn(async (_pattern, handler) => {
+        routeHandler = handler;
+      }),
+    };
+    const page = {
+      context: jest.fn(() => context),
+      on: jest.fn(),
+      addInitScript: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn(async (fn, arg) => {
+        const source = String(fn);
+        if (source.includes('installActionTrackerScript')) return undefined;
+        if (source.includes('startAction')) {
+          trackerState.activeToken = arg;
+          return undefined;
+        }
+        if (source.includes('finishAction')) {
+          if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+          return undefined;
+        }
+        if (source.includes('getPendingCount')) return trackerState.pendingCounts.get(arg) || 0;
+        if (source.includes('getActiveToken')) return trackerState.activeToken || 0;
+        return undefined;
+      }),
+      waitForTimeout: jest.fn((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    };
+
+    await createTabState(page);
+    const actionPromise = withBlockedNavigationTracking(page, async () => {
+      setTimeout(() => {
+        void routeHandler(blockedRoute);
+      }, 0);
+    }, { settlePostActionNavigation: true });
+
+    await expect(actionPromise).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringContaining('Blocked private network target'),
+    });
+    expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
+  });
+
+  test('drains an asynchronous guard check queued after the action promise settles', async () => {
+    jest.useFakeTimers();
+    try {
+      lookupMock.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve([{ address: '127.0.0.1', family: 4 }]), 50)),
+      );
+
+      let routeHandler;
+      const trackerState = {
+        activeToken: 0,
+        pendingCounts: new Map(),
+      };
+      const blockedRoute = {
+        request: () => ({
+          url: () => 'http://public-looking.example.test/latest/meta-data',
+          isNavigationRequest: () => true,
+          frame: () => ({ page: () => page }),
+        }),
+        continue: jest.fn().mockResolvedValue(undefined),
+        abort: jest.fn().mockResolvedValue(undefined),
+      };
+      const context = {
+        route: jest.fn(async (_pattern, handler) => {
+          routeHandler = handler;
+        }),
+      };
+      const page = {
+        context: jest.fn(() => context),
+        on: jest.fn(),
+        addInitScript: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest.fn(async (fn, arg) => {
+          const source = String(fn);
+          if (source.includes('installActionTrackerScript')) return undefined;
+          if (source.includes('startAction')) {
+            trackerState.activeToken = arg;
+            return undefined;
+          }
+          if (source.includes('finishAction')) {
+            if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+            return undefined;
+          }
+          if (source.includes('getPendingCount')) return trackerState.pendingCounts.get(arg) || 0;
+          if (source.includes('getActiveToken')) {
+            return new Promise((resolve) => setTimeout(() => resolve(trackerState.activeToken || 0), 5));
+          }
+          return undefined;
+        }),
+        waitForTimeout: jest.fn((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+      };
+
+      await createTabState(page);
+      const actionPromise = withBlockedNavigationTracking(page, async () => {
+        setTimeout(() => {
+          void routeHandler(blockedRoute);
+        }, 0);
+      }, { settlePostActionNavigation: true });
+      const actionExpectation = expect(actionPromise).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('Blocked private network target'),
+      });
+
+      await jest.advanceTimersByTimeAsync(100);
+      await actionExpectation;
+      expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

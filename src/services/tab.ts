@@ -632,6 +632,10 @@ function decrementInFlightGuardCheck(page: Page): void {
 	}
 }
 
+function getInFlightGuardCheckCount(page: Page): number {
+	return inFlightGuardChecks.get(page) || 0;
+}
+
 function incrementTrackedInFlightGuardCheck(page: Page, token: number): void {
 	const existing = trackedInFlightGuardChecks.get(page) || new Map<number, number>();
 	existing.set(token, (existing.get(token) || 0) + 1);
@@ -656,6 +660,14 @@ function getTrackedInFlightGuardCheckCount(page: Page, token: number): number {
 	return trackedInFlightGuardChecks.get(page)?.get(token) || 0;
 }
 
+async function yieldToPostActionNavigation(page: Page): Promise<void> {
+	if (typeof page.waitForTimeout === 'function') {
+		await page.waitForTimeout(0);
+		return;
+	}
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export async function flushBlockedNavigationError(page: Page): Promise<void> {
 	if (typeof page.waitForTimeout === 'function') {
 		await page.waitForTimeout(POST_ACTION_NAVIGATION_SETTLE_MS);
@@ -663,7 +675,16 @@ export async function flushBlockedNavigationError(page: Page): Promise<void> {
 	throwBlockedNavigationErrorIfPresent(page);
 }
 
-export async function withBlockedNavigationTracking<T>(page: Page, action: () => Promise<T>): Promise<T> {
+export interface BlockedNavigationTrackingOptions {
+	/** Yield once after actions whose DOM event can enqueue navigation after the action promise resolves. */
+	settlePostActionNavigation?: boolean;
+}
+
+export async function withBlockedNavigationTracking<T>(
+	page: Page,
+	action: () => Promise<T>,
+	options: BlockedNavigationTrackingOptions = {},
+): Promise<T> {
 	if (CONFIG.allowPrivateNetworkTargets) {
 		return action();
 	}
@@ -720,6 +741,25 @@ export async function withBlockedNavigationTracking<T>(page: Page, action: () =>
 		throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
 		if (sawPendingWork) {
 			throwBlockedNavigationErrorIfPresent(page);
+		}
+		if (options.settlePostActionNavigation) {
+			// Some DOM actions (for example selectOption with a synchronous
+			// location.href handler) enqueue navigation after the action promise
+			// resolves without creating tracked timer work. Yield once while the
+			// action token is still active so the route guard can associate that
+			// request with this action before the in-flight drain below.
+			await yieldToPostActionNavigation(page);
+			let postActionPendingWork = true;
+			while (postActionPendingWork) {
+				throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
+				const pendingCount = await getTrackedPendingCount(page, actionToken);
+				const inFlightGuardCount = getTrackedInFlightGuardCheckCount(page, actionToken);
+				postActionPendingWork = pendingCount > 0 || inFlightGuardCount > 0 || getInFlightGuardCheckCount(page) > 0;
+				if (postActionPendingWork) {
+					await new Promise((resolve) => setTimeout(resolve, ACTION_TRACKER_POLL_MS));
+				}
+			}
+			throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
 		}
 		await finish();
 		return result;
@@ -1108,34 +1148,42 @@ async function ensureNavigationSafetyGuard(page: Pick<Page, 'context'>, options:
 		const requestPage = requestFrame && typeof requestFrame.page === 'function' ? requestFrame.page() : null;
 		const relatedPages = new Set<Page>();
 		let trackedToken: number | null = null;
-		if (requestPage) {
-			relatedPages.add(requestPage);
-			trackedToken = await getCurrentTrackedActionToken(requestPage);
-			const mappedOpener = popupOpenerPages.get(requestPage);
-			if (mappedOpener) {
-				relatedPages.add(mappedOpener);
-				if (trackedToken === null) {
-					trackedToken = await getCurrentTrackedActionToken(mappedOpener);
-				}
-			} else if (typeof requestPage.opener === 'function') {
-				const openerPage = await requestPage.opener().catch(() => null);
-				if (openerPage) {
-					relatedPages.add(openerPage);
+		const addRelatedPage = (page: Page): void => {
+			if (relatedPages.has(page)) return;
+			relatedPages.add(page);
+			// Count the route before resolving the action token. The token lookup
+			// itself is asynchronous and the action wrapper must not finish while
+			// a guard check is still being associated with its page.
+			incrementInFlightGuardCheck(page);
+		};
+
+		try {
+			if (requestPage) {
+				addRelatedPage(requestPage);
+				trackedToken = await getCurrentTrackedActionToken(requestPage);
+				const mappedOpener = popupOpenerPages.get(requestPage);
+				if (mappedOpener) {
+					addRelatedPage(mappedOpener);
 					if (trackedToken === null) {
-						trackedToken = await getCurrentTrackedActionToken(openerPage);
+						trackedToken = await getCurrentTrackedActionToken(mappedOpener);
+					}
+				} else if (typeof requestPage.opener === 'function') {
+					const openerPage = await requestPage.opener().catch(() => null);
+					if (openerPage) {
+						addRelatedPage(openerPage);
+						if (trackedToken === null) {
+							trackedToken = await getCurrentTrackedActionToken(openerPage);
+						}
 					}
 				}
 			}
-		}
 
-		for (const relatedPage of relatedPages) {
-			incrementInFlightGuardCheck(relatedPage);
 			if (trackedToken !== null) {
-				incrementTrackedInFlightGuardCheck(relatedPage, trackedToken);
+				for (const relatedPage of relatedPages) {
+					incrementTrackedInFlightGuardCheck(relatedPage, trackedToken);
+				}
 			}
-		}
 
-		try {
 			const requestError = await validateNavigationUrl(request.url(), { allowPrivateNetworkTargets: false });
 			if (requestError) {
 				for (const relatedPage of relatedPages) {
