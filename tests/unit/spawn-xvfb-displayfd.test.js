@@ -747,24 +747,37 @@ nativeDescribe('spawnXvfb native Xvfb contract (Linux-only)', () => {
   });
 
   // Terminate and reap every started Xvfb child. Safe to call repeatedly.
-  // Sends SIGTERM, waits up to 3s for exit, then escalates to SIGKILL.
+  // Sends SIGTERM, waits up to 3s for exit, then escalates to SIGKILL and
+  // waits up to 2s for the child to actually exit/close after SIGKILL.
+  // Cleanup continues if one child fails (one failure must not abort the rest).
   const killAll = async (children) => {
     for (const proc of children) {
       try {
         if (proc.exitCode === null && proc.signalCode === null) {
           proc.kill('SIGTERM');
-          // Wait up to 3s for graceful exit
-          await new Promise((resolve) => {
+          // Wait up to 3s for graceful exit, then escalate to SIGKILL
+          const exitedGracefully = await new Promise((resolve) => {
             const timer = setTimeout(() => {
-              try { proc.kill('SIGKILL'); } catch { /* already dead */ }
-              resolve();
+              resolve(false); // timeout — escalate to SIGKILL below
             }, 3000);
-            proc.once('exit', () => { clearTimeout(timer); resolve(); });
-            proc.once('close', () => { clearTimeout(timer); resolve(); });
+            proc.once('exit', () => { clearTimeout(timer); resolve(true); });
+            proc.once('close', () => { clearTimeout(timer); resolve(true); });
           });
+          if (!exitedGracefully) {
+            // SIGKILL and wait up to 2s for the child to actually exit/close
+            try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+            await new Promise((resolve) => {
+              const killTimer = setTimeout(() => {
+                // Last-resort: resolve even if the OS hasn't reaped yet
+                resolve();
+              }, 2000);
+              proc.once('exit', () => { clearTimeout(killTimer); resolve(); });
+              proc.once('close', () => { clearTimeout(killTimer); resolve(); });
+            });
+          }
         }
       } catch {
-        // already dead
+        // already dead — cleanup continues for remaining children
       }
     }
   };
