@@ -481,7 +481,7 @@ The OpenAPI spec covers a representative subset of core and OpenClaw endpoints, 
 
 ### Core Endpoints
 
-Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the server resolves `tabId` **within a `userId` scope**. If you omit `userId`, you will typically get `404 Tab not found`.
+Note: For any endpoint that targets an existing tab (`/tabs/:tabId/...`), the server resolves `tabId` **within a `userId` scope**. If you omit `userId` from the request body, the server returns `400 { "error": "userId is required" }`. If `userId` is present but the tab belongs to a different user, the server returns `404 Tab not found` — except `DELETE /tabs/:tabId`, which is idempotent and returns `200 { "ok": true }` when no matching tab is found under the given `userId` scope (the tab is already gone from the caller's perspective). For endpoints that accept `userId` as a query parameter (e.g. `GET /tabs/:tabId/snapshot`), omitting it may also result in a `400` or `404` depending on the route.
 
 | Method | Endpoint | Description | Required | Auth |
 |--------|----------|-------------|----------|------|
