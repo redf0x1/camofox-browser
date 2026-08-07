@@ -1,3 +1,5 @@
+const vm = require('node:vm');
+
 jest.mock('node:dns/promises', () => ({
   lookup: jest.fn(),
 }));
@@ -667,6 +669,109 @@ describe('validateUrl() network safety', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  test('keeps action-scheduled RAF navigation attributed until the frame runs', async () => {
+    let routeHandler;
+    let nextRafId = 1;
+    const rafCallbacks = new Map();
+    const trackerState = {
+      activeToken: 0,
+      pendingCounts: new Map(),
+    };
+    const sandbox = {
+      clearInterval,
+      clearTimeout,
+      console,
+      eval,
+      queueMicrotask,
+      requestAnimationFrame: (callback) => {
+        const rafId = nextRafId++;
+        rafCallbacks.set(rafId, callback);
+        return rafId;
+      },
+      cancelAnimationFrame: (rafId) => {
+        rafCallbacks.delete(rafId);
+      },
+      setInterval,
+      setTimeout,
+      __camofoxUpdateActiveToken: (token) => {
+        trackerState.activeToken = token;
+      },
+      __camofoxUpdatePendingCount: (token, count) => {
+        if (count > 0) trackerState.pendingCounts.set(token, count);
+        else trackerState.pendingCounts.delete(token);
+      },
+    };
+    sandbox.globalThis = sandbox;
+    const browserContext = vm.createContext(sandbox);
+    const blockedRoute = {
+      request: () => ({
+        url: () => 'http://169.254.169.254/latest/meta-data',
+        isNavigationRequest: () => true,
+        frame: () => ({ page: () => page }),
+      }),
+      continue: jest.fn().mockResolvedValue(undefined),
+      abort: jest.fn().mockResolvedValue(undefined),
+    };
+    const context = {
+      route: jest.fn(async (_pattern, handler) => {
+        routeHandler = handler;
+      }),
+      exposeBinding: jest.fn(async (name, callback) => {
+        if (name === '__camofoxUpdateActiveToken') {
+          sandbox.__camofoxUpdateActiveToken = (token) => callback({ page }, token);
+        }
+        if (name === '__camofoxUpdatePendingCount') {
+          sandbox.__camofoxUpdatePendingCount = (token, count) => callback({ page }, token, count);
+        }
+      }),
+    };
+    const page = {
+      context: jest.fn(() => context),
+      on: jest.fn(),
+      addInitScript: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn(async (fn, arg) => {
+        const source = String(fn);
+        if (source.includes('installActionTrackerScript')) {
+          return vm.runInContext(`(${source})()`, browserContext);
+        }
+        if (source.includes('startAction')) {
+          return sandbox.__camofoxActionTracker.startAction(arg);
+        }
+        if (source.includes('finishAction')) {
+          return sandbox.__camofoxActionTracker.finishAction(arg);
+        }
+        if (source.includes('getPendingCount')) {
+          return sandbox.__camofoxActionTracker.getPendingCount(arg);
+        }
+        if (source.includes('getActiveToken')) {
+          return sandbox.__camofoxActionTracker.getActiveToken();
+        }
+        return undefined;
+      }),
+    };
+
+    await createTabState(page);
+    const actionPromise = withBlockedNavigationTracking(page, async () => {
+      sandbox.requestAnimationFrame(() => {
+        void routeHandler(blockedRoute);
+      });
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(rafCallbacks).toHaveProperty('size', 1);
+    expect(sandbox.__camofoxActionTracker.getPendingCount(1)).toBe(1);
+
+    const [rafId, callback] = rafCallbacks.entries().next().value;
+    rafCallbacks.delete(rafId);
+    callback(0);
+
+    await expect(actionPromise).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringContaining('Blocked private network target'),
+    });
+    expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
   });
 
   test('typeTab does not miss delayed blocked navigations that require async DNS resolution', async () => {

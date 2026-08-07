@@ -442,11 +442,11 @@ function installActionTrackerScript(): void {
 	if (originalRequestAnimationFrame && originalCancelAnimationFrame) {
 		browserGlobal.requestAnimationFrame = (callback: BrowserFrameRequestCallback) => {
 			const token = state.activeToken;
+			if (token > 0) increment(token);
 			let rafId = 0;
 			const wrapped: BrowserFrameRequestCallback = (timestamp: number) => {
 				const trackedToken = state.rafTokens.get(rafId) ?? token;
 				state.rafTokens.delete(rafId);
-				if (trackedToken > 0) increment(trackedToken);
 				try {
 					return withToken(trackedToken, () => callback(timestamp));
 				} finally {
@@ -462,6 +462,7 @@ function installActionTrackerScript(): void {
 			const token = state.rafTokens.get(rafId);
 			if (token !== undefined) {
 				state.rafTokens.delete(rafId);
+				if (token > 0) decrement(token);
 			}
 			return originalCancelAnimationFrame(rafId);
 		};
