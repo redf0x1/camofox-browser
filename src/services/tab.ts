@@ -57,6 +57,7 @@ const DEFAULT_EVAL_EXTENDED_TIMEOUT = 30000;
 const MAX_RESULT_SIZE = 1048576; // 1MB
 const CONSOLE_BUFFER_SIZE = CONFIG.consoleBufferSize;
 const POST_ACTION_NAVIGATION_SETTLE_MS = 500;
+const POST_ACTION_NAVIGATION_DRAIN_TIMEOUT_MS = POST_ACTION_NAVIGATION_SETTLE_MS;
 const ACTION_TRACKER_POLL_MS = 10;
 type NavigationRoute = {
 	request: () => {
@@ -387,49 +388,45 @@ function installActionTrackerScript(): void {
 		? browserGlobal.queueMicrotask.bind(browserGlobal)
 		: null;
 
+	// Wrap tokenless callbacks too, so background work restores token 0 while a
+	// tracked action is in its bounded post-action attribution window.
 	browserGlobal.setTimeout = (handler: BrowserTimerHandler, delay?: number, ...args: unknown[]) => {
 		const token = state.activeToken;
-		if (!token) {
-			return originalSetTimeout(handler, delay, ...args);
-		}
-		increment(token);
 		let timeoutId: ReturnType<typeof setTimeout>;
 		const wrapped = (...callbackArgs: unknown[]) => {
-			const trackedToken = state.timeoutTokens.get(timeoutId) || token;
+			const trackedToken = state.timeoutTokens.get(timeoutId) ?? token;
 			state.timeoutTokens.delete(timeoutId);
 			try {
 				return withToken(trackedToken, () => runHandler(handler, callbackArgs));
 			} finally {
-				decrement(trackedToken);
+				if (trackedToken > 0) decrement(trackedToken);
 			}
 		};
 		timeoutId = originalSetTimeout(wrapped, delay, ...args);
+		if (token > 0) increment(token);
 		state.timeoutTokens.set(timeoutId, token);
 		return timeoutId;
 	};
 
 	browserGlobal.clearTimeout = (timeoutId: ReturnType<typeof setTimeout>) => {
 		const token = state.timeoutTokens.get(timeoutId);
-		if (token) {
+		if (token !== undefined) {
 			state.timeoutTokens.delete(timeoutId);
-			decrement(token);
+			if (token > 0) decrement(token);
 		}
 		return originalClearTimeout(timeoutId);
 	};
 
 	browserGlobal.setInterval = (handler: BrowserTimerHandler, delay?: number, ...args: unknown[]) => {
 		const token = state.activeToken;
-		if (!token) {
-			return originalSetInterval(handler, delay, ...args);
-		}
 		let intervalId: ReturnType<typeof setInterval>;
 		const wrapped = (...callbackArgs: unknown[]) => {
-			const trackedToken = state.intervalTokens.get(intervalId) || token;
-			increment(trackedToken);
+			const trackedToken = state.intervalTokens.get(intervalId) ?? token;
+			if (trackedToken > 0) increment(trackedToken);
 			try {
 				return withToken(trackedToken, () => runHandler(handler, callbackArgs));
 			} finally {
-				decrement(trackedToken);
+				if (trackedToken > 0) decrement(trackedToken);
 			}
 		};
 		intervalId = originalSetInterval(wrapped, delay, ...args);
@@ -445,18 +442,15 @@ function installActionTrackerScript(): void {
 	if (originalRequestAnimationFrame && originalCancelAnimationFrame) {
 		browserGlobal.requestAnimationFrame = (callback: BrowserFrameRequestCallback) => {
 			const token = state.activeToken;
-			if (!token) {
-				return originalRequestAnimationFrame(callback);
-			}
-			increment(token);
+			if (token > 0) increment(token);
 			let rafId = 0;
 			const wrapped: BrowserFrameRequestCallback = (timestamp: number) => {
-				const trackedToken = state.rafTokens.get(rafId) || token;
+				const trackedToken = state.rafTokens.get(rafId) ?? token;
 				state.rafTokens.delete(rafId);
 				try {
 					return withToken(trackedToken, () => callback(timestamp));
 				} finally {
-					decrement(trackedToken);
+					if (trackedToken > 0) decrement(trackedToken);
 				}
 			};
 			rafId = originalRequestAnimationFrame(wrapped);
@@ -466,9 +460,9 @@ function installActionTrackerScript(): void {
 
 		browserGlobal.cancelAnimationFrame = (rafId: number) => {
 			const token = state.rafTokens.get(rafId);
-			if (token) {
+			if (token !== undefined) {
 				state.rafTokens.delete(rafId);
-				decrement(token);
+				if (token > 0) decrement(token);
 			}
 			return originalCancelAnimationFrame(rafId);
 		};
@@ -477,15 +471,12 @@ function installActionTrackerScript(): void {
 	if (originalQueueMicrotask) {
 		browserGlobal.queueMicrotask = (callback: BrowserVoidFunction) => {
 			const token = state.activeToken;
-			if (!token) {
-				return originalQueueMicrotask(callback);
-			}
-			increment(token);
+			if (token > 0) increment(token);
 			return originalQueueMicrotask(() => {
 				try {
 					return withToken(token, callback);
 				} finally {
-					decrement(token);
+					if (token > 0) decrement(token);
 				}
 			});
 		};
@@ -610,8 +601,8 @@ async function getCurrentTrackedActionToken(page: Page): Promise<number | null> 
 		const token = await page.evaluate(() => {
 			return (globalThis as any).__camofoxActionTracker?.getActiveToken?.() || 0;
 		});
-		if (typeof token === 'number' && token > 0) {
-			return token;
+		if (typeof token === 'number') {
+			return token > 0 ? token : null;
 		}
 		return activeTrackedActionTokens.get(page) || null;
 	} catch {
@@ -630,6 +621,10 @@ function decrementInFlightGuardCheck(page: Page): void {
 	} else {
 		inFlightGuardChecks.delete(page);
 	}
+}
+
+function getInFlightGuardCheckCount(page: Page): number {
+	return inFlightGuardChecks.get(page) || 0;
 }
 
 function incrementTrackedInFlightGuardCheck(page: Page, token: number): void {
@@ -656,6 +651,51 @@ function getTrackedInFlightGuardCheckCount(page: Page, token: number): number {
 	return trackedInFlightGuardChecks.get(page)?.get(token) || 0;
 }
 
+async function yieldToPostActionNavigation(page: Page): Promise<void> {
+	if (typeof page.waitForTimeout === 'function') {
+		await page.waitForTimeout(0);
+		return;
+	}
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function createPostActionNavigationTimeoutError(): Error & { statusCode: number } {
+	return createNavigationBlockError('Blocked navigation guard did not settle before the action completed');
+}
+
+async function withPostActionNavigationDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
+	const remainingMs = deadline - Date.now();
+	if (remainingMs <= 0) throw createPostActionNavigationTimeoutError();
+	try {
+		return await withTimeout(promise, remainingMs, 'post-action navigation tracking');
+	} catch {
+		throw createPostActionNavigationTimeoutError();
+	}
+}
+
+async function drainPostActionNavigation(page: Page, actionToken: number): Promise<void> {
+	const deadline = Date.now() + POST_ACTION_NAVIGATION_DRAIN_TIMEOUT_MS;
+	await withPostActionNavigationDeadline(yieldToPostActionNavigation(page), deadline);
+
+	while (true) {
+		throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
+		const pendingCount = await withPostActionNavigationDeadline(getTrackedPendingCount(page, actionToken), deadline);
+		const inFlightGuardCount = getTrackedInFlightGuardCheckCount(page, actionToken);
+		const postActionPendingWork = pendingCount > 0 || inFlightGuardCount > 0 || getInFlightGuardCheckCount(page) > 0;
+		if (!postActionPendingWork) break;
+		await withPostActionNavigationDeadline(
+			new Promise((resolve) => setTimeout(resolve, ACTION_TRACKER_POLL_MS)),
+			deadline,
+		);
+	}
+
+	throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
+	// A tokenless navigation during the settle turn is background work. It was
+	// blocked by the guard, but must not become the select action's response or
+	// leak into the next operation.
+	clearBlockedNavigationError(page);
+}
+
 export async function flushBlockedNavigationError(page: Page): Promise<void> {
 	if (typeof page.waitForTimeout === 'function') {
 		await page.waitForTimeout(POST_ACTION_NAVIGATION_SETTLE_MS);
@@ -663,7 +703,16 @@ export async function flushBlockedNavigationError(page: Page): Promise<void> {
 	throwBlockedNavigationErrorIfPresent(page);
 }
 
-export async function withBlockedNavigationTracking<T>(page: Page, action: () => Promise<T>): Promise<T> {
+export interface BlockedNavigationTrackingOptions {
+	/** Yield once after actions whose DOM event can enqueue navigation after the action promise resolves. */
+	settlePostActionNavigation?: boolean;
+}
+
+export async function withBlockedNavigationTracking<T>(
+	page: Page,
+	action: () => Promise<T>,
+	options: BlockedNavigationTrackingOptions = {},
+): Promise<T> {
 	if (CONFIG.allowPrivateNetworkTargets) {
 		return action();
 	}
@@ -720,6 +769,14 @@ export async function withBlockedNavigationTracking<T>(page: Page, action: () =>
 		throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
 		if (sawPendingWork) {
 			throwBlockedNavigationErrorIfPresent(page);
+		}
+		if (options.settlePostActionNavigation) {
+			// Some DOM actions (for example selectOption with a synchronous
+			// location.href handler) enqueue navigation after the action promise
+			// resolves without creating tracked timer work. Yield once while the
+			// action token is still active so the route guard can associate that
+			// request with this action before the in-flight drain below.
+			await drainPostActionNavigation(page, actionToken);
 		}
 		await finish();
 		return result;
@@ -1108,34 +1165,42 @@ async function ensureNavigationSafetyGuard(page: Pick<Page, 'context'>, options:
 		const requestPage = requestFrame && typeof requestFrame.page === 'function' ? requestFrame.page() : null;
 		const relatedPages = new Set<Page>();
 		let trackedToken: number | null = null;
-		if (requestPage) {
-			relatedPages.add(requestPage);
-			trackedToken = await getCurrentTrackedActionToken(requestPage);
-			const mappedOpener = popupOpenerPages.get(requestPage);
-			if (mappedOpener) {
-				relatedPages.add(mappedOpener);
-				if (trackedToken === null) {
-					trackedToken = await getCurrentTrackedActionToken(mappedOpener);
-				}
-			} else if (typeof requestPage.opener === 'function') {
-				const openerPage = await requestPage.opener().catch(() => null);
-				if (openerPage) {
-					relatedPages.add(openerPage);
+		const addRelatedPage = (page: Page): void => {
+			if (relatedPages.has(page)) return;
+			relatedPages.add(page);
+			// Count the route before resolving the action token. The token lookup
+			// itself is asynchronous and the action wrapper must not finish while
+			// a guard check is still being associated with its page.
+			incrementInFlightGuardCheck(page);
+		};
+
+		try {
+			if (requestPage) {
+				addRelatedPage(requestPage);
+				trackedToken = await getCurrentTrackedActionToken(requestPage);
+				const mappedOpener = popupOpenerPages.get(requestPage);
+				if (mappedOpener) {
+					addRelatedPage(mappedOpener);
 					if (trackedToken === null) {
-						trackedToken = await getCurrentTrackedActionToken(openerPage);
+						trackedToken = await getCurrentTrackedActionToken(mappedOpener);
+					}
+				} else if (typeof requestPage.opener === 'function') {
+					const openerPage = await requestPage.opener().catch(() => null);
+					if (openerPage) {
+						addRelatedPage(openerPage);
+						if (trackedToken === null) {
+							trackedToken = await getCurrentTrackedActionToken(openerPage);
+						}
 					}
 				}
 			}
-		}
 
-		for (const relatedPage of relatedPages) {
-			incrementInFlightGuardCheck(relatedPage);
 			if (trackedToken !== null) {
-				incrementTrackedInFlightGuardCheck(relatedPage, trackedToken);
+				for (const relatedPage of relatedPages) {
+					incrementTrackedInFlightGuardCheck(relatedPage, trackedToken);
+				}
 			}
-		}
 
-		try {
 			const requestError = await validateNavigationUrl(request.url(), { allowPrivateNetworkTargets: false });
 			if (requestError) {
 				for (const relatedPage of relatedPages) {

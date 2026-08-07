@@ -571,7 +571,7 @@ router.post('/act', async (req: Request<unknown, unknown, Record<string, unknown
 						} else {
 							await tabState.page.locator(String(selector)).selectOption(value);
 						}
-					});
+					}, { settlePostActionNavigation: true });
 					return { ok: true, targetId };
 				}
 
