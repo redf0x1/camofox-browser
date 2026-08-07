@@ -15,6 +15,7 @@ describe('validateUrl() network safety', () => {
   let typeTab;
   let waitForPageReady;
   let withBlockedNavigationTracking;
+  let withTabLock;
   let lookupMock;
   const originalHost = process.env.CAMOFOX_HOST;
   const originalApiKey = process.env.CAMOFOX_API_KEY;
@@ -25,7 +26,7 @@ describe('validateUrl() network safety', () => {
     process.env.CAMOFOX_API_KEY = 'test-key';
     ({ lookup: lookupMock } = require('node:dns/promises'));
     lookupMock.mockReset();
-    ({ validateUrl, validateNavigationUrl, navigateWithSafetyGuard, createTabState, clickTab, evaluateTab, pressTab, scrollElementTab, scrollTab, typeTab, waitForPageReady, withBlockedNavigationTracking } =
+    ({ validateUrl, validateNavigationUrl, navigateWithSafetyGuard, createTabState, clickTab, evaluateTab, pressTab, scrollElementTab, scrollTab, typeTab, waitForPageReady, withBlockedNavigationTracking, withTabLock } =
       require('../../dist/src/services/tab'));
   });
 
@@ -531,6 +532,138 @@ describe('validateUrl() network safety', () => {
       await jest.advanceTimersByTimeAsync(100);
       await actionExpectation;
       expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('does not blame a select action for tokenless background navigation during settle', async () => {
+    let routeHandler;
+    const trackerState = {
+      activeToken: 0,
+      pendingCounts: new Map(),
+    };
+    const blockedRoute = {
+      request: () => ({
+        url: () => 'http://169.254.169.254/latest/meta-data',
+        isNavigationRequest: () => true,
+        frame: () => ({ page: () => page }),
+      }),
+      continue: jest.fn().mockResolvedValue(undefined),
+      abort: jest.fn().mockResolvedValue(undefined),
+    };
+    const context = {
+      route: jest.fn(async (_pattern, handler) => {
+        routeHandler = handler;
+      }),
+    };
+    const page = {
+      context: jest.fn(() => context),
+      on: jest.fn(),
+      addInitScript: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn(async (fn, arg) => {
+        const source = String(fn);
+        if (source.includes('installActionTrackerScript')) return undefined;
+        if (source.includes('startAction')) {
+          trackerState.activeToken = arg;
+          return undefined;
+        }
+        if (source.includes('finishAction')) {
+          if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+          return undefined;
+        }
+        if (source.includes('getPendingCount')) return trackerState.pendingCounts.get(arg) || 0;
+        if (source.includes('getActiveToken')) return trackerState.activeToken || 0;
+        return undefined;
+      }),
+      waitForTimeout: jest.fn((ms) => new Promise((resolve) => setTimeout(resolve, ms === 0 ? 30 : ms))),
+    };
+
+    await createTabState(page);
+    const actionPromise = withBlockedNavigationTracking(page, async () => {
+      setTimeout(() => {
+        trackerState.activeToken = 0;
+        void routeHandler(blockedRoute);
+      }, 20);
+    }, { settlePostActionNavigation: true });
+
+    await expect(actionPromise).resolves.toBeUndefined();
+    expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
+  });
+
+  test('bounds a stuck post-action guard and releases the tab lock', async () => {
+    jest.useFakeTimers();
+    let resolveLookup;
+    try {
+      lookupMock.mockImplementation(
+        () => new Promise((resolve) => {
+          resolveLookup = resolve;
+        }),
+      );
+
+      let routeHandler;
+      const trackerState = {
+        activeToken: 0,
+        pendingCounts: new Map(),
+      };
+      const blockedRoute = {
+        request: () => ({
+          url: () => 'http://public-looking.example.test/latest/meta-data',
+          isNavigationRequest: () => true,
+          frame: () => ({ page: () => page }),
+        }),
+        continue: jest.fn().mockResolvedValue(undefined),
+        abort: jest.fn().mockResolvedValue(undefined),
+      };
+      const context = {
+        route: jest.fn(async (_pattern, handler) => {
+          routeHandler = handler;
+        }),
+      };
+      const page = {
+        context: jest.fn(() => context),
+        on: jest.fn(),
+        addInitScript: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest.fn(async (fn, arg) => {
+          const source = String(fn);
+          if (source.includes('installActionTrackerScript')) return undefined;
+          if (source.includes('startAction')) {
+            trackerState.activeToken = arg;
+            return undefined;
+          }
+          if (source.includes('finishAction')) {
+            if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+            return undefined;
+          }
+          if (source.includes('getPendingCount')) return trackerState.pendingCounts.get(arg) || 0;
+          if (source.includes('getActiveToken')) return trackerState.activeToken || 0;
+          return undefined;
+        }),
+        waitForTimeout: jest.fn((ms) => new Promise((resolve) => setTimeout(resolve, ms === 0 ? 30 : ms))),
+      };
+
+      await createTabState(page);
+      const firstAction = withTabLock('stuck-tab', () => withBlockedNavigationTracking(page, async () => {
+        setTimeout(() => {
+          void routeHandler(blockedRoute);
+        }, 20);
+      }, { settlePostActionNavigation: true }));
+      const firstExpectation = expect(firstAction).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('did not settle'),
+      });
+
+      await jest.advanceTimersByTimeAsync(700);
+      await firstExpectation;
+
+      let secondRan = false;
+      await withTabLock('stuck-tab', async () => {
+        secondRan = true;
+      });
+      expect(secondRan).toBe(true);
+
+      resolveLookup([{ address: '8.8.8.8', family: 4 }]);
+      await jest.runOnlyPendingTimersAsync();
     } finally {
       jest.useRealTimers();
     }
