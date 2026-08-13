@@ -10,7 +10,7 @@ import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 
-import { loadConfig } from "./dist/src/utils/config.js";
+import { loadConfig, normalizeServerBaseUrl } from "./dist/src/utils/config.js";
 import { launchServer } from "./dist/src/utils/launcher.js";
 import { readCookieFile } from "./dist/src/utils/cookies.js";
 
@@ -209,7 +209,7 @@ function toToolResult(data: unknown): ToolResult {
 export default function register(api: PluginApi) {
   const cfg = api.pluginConfig ?? (api.config as unknown as PluginConfig);
   const port = cfg.port || 9377;
-  const baseUrl = cfg.url || `http://localhost:${port}`;
+  const baseUrl = normalizeServerBaseUrl(cfg.url || `http://localhost:${port}`);
   const autoStart = cfg.autoStart !== false; // default true
   const pluginDir = getPluginDir();
   const fallbackUserId = `camofox-${randomUUID()}`;

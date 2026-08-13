@@ -23,6 +23,7 @@
 - [API Reference](#api-reference)
 - [Structured Extract](#structured-extract)
 - [Search Macros](#search-macros)
+- [Structured X Workflows](#structured-x-workflows)
 - [Geo Presets](#geo-presets)
 - [Environment Variables](#environment-variables)
 - [Deployment](#deployment)
@@ -713,6 +714,29 @@ Use macros via `POST /tabs/:tabId/navigate` with `{ "macro": "@google_search", "
 | `@tiktok_search` | TikTok |
 | `@twitch_search` | Twitch |
 
+## Structured X Handoff
+
+The `@twitter_search` macro opens X web search in a CamoFox tab. Use CamoFox for
+interactive or visual browser work. Use
+[TweetClaw](https://github.com/Xquik-dev/tweetclaw) when a workflow needs
+structured X data or an approval-gated account action.
+
+Keep each plugin focused:
+
+| Need | Use |
+|------|-----|
+| Open a page, inspect visual state, or interact with a site | CamoFox |
+| Search tweets, read profiles, or inspect replies as structured data | TweetClaw |
+| Run an approval-gated X account action or monitor | TweetClaw |
+| Verify a linked site from structured X results | TweetClaw, then CamoFox |
+
+```bash
+openclaw plugins install npm:@xquik/tweetclaw
+```
+
+Pass returned URLs to CamoFox only when browser verification is necessary. Do
+not send API keys through browser forms, page scripts, screenshots, or logs.
+
 ## Geo Presets
 
 Built-in presets (also exposed via `GET /presets`):
@@ -1002,6 +1026,7 @@ fly deploy
 | [CamoFox MCP](https://github.com/redf0x1/camofox-mcp) | MCP (Model Context Protocol) server for Claude, Cursor, VS Code |
 | [OpenClaw](https://openclaw.ai) | Open-source AI agent framework (compat endpoints included) |
 | [Camoufox](https://github.com/daijro/camoufox) | Anti-detection Firefox browser engine |
+| [TweetClaw](https://github.com/Xquik-dev/tweetclaw) | Structured X workflows for OpenClaw; pair with CamoFox for browser verification |
 
 ## Project Structure
 
