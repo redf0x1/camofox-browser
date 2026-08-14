@@ -59,6 +59,17 @@ const CONSOLE_BUFFER_SIZE = CONFIG.consoleBufferSize;
 const POST_ACTION_NAVIGATION_SETTLE_MS = 500;
 const POST_ACTION_NAVIGATION_DRAIN_TIMEOUT_MS = POST_ACTION_NAVIGATION_SETTLE_MS;
 const ACTION_TRACKER_POLL_MS = 10;
+// Upper bound on the post-action drain loop below. The loop waits for tracked
+// async work (setTimeout/setInterval/rAF) to reach zero, which never happens on
+// pages with perpetual background activity -- a heartbeat interval, an analytics
+// beacon, or an animating carousel driving requestAnimationFrame every frame.
+// Without a deadline the loop spins forever while holding the tab lock, so the
+// caller's timeout rejects the request but the lock is never released and every
+// later call on that tab queues behind it. Draining is a best-effort settle, not
+// a correctness requirement: blocked-navigation errors are still checked before
+// and after, so timing out here degrades to "proceed without a full settle"
+// rather than losing the guard.
+const ACTION_TRACKER_DRAIN_TIMEOUT_MS = 3000;
 type NavigationRoute = {
 	request: () => {
 		url: () => string;
@@ -742,10 +753,17 @@ export async function withBlockedNavigationTracking<T>(
 		}
 
 		let sawPendingWork = false;
+		const drainDeadline = Date.now() + ACTION_TRACKER_DRAIN_TIMEOUT_MS;
 		while (true) {
 			throwTrackedBlockedNavigationErrorIfPresent(page, actionToken);
 			if (sawPendingWork) {
 				throwBlockedNavigationErrorIfPresent(page);
+			}
+			if (Date.now() >= drainDeadline) {
+				log('warn', 'action drain timed out, proceeding without full settle', {
+					timeoutMs: ACTION_TRACKER_DRAIN_TIMEOUT_MS,
+				});
+				break;
 			}
 			const pendingCount = await getTrackedPendingCount(page, actionToken);
 			const inFlightGuardCount = getTrackedInFlightGuardCheckCount(page, actionToken);

@@ -734,6 +734,69 @@ describe('validateUrl() network safety', () => {
     }
   });
 
+  test('bounds the drain on a page whose tracked work never reaches zero', async () => {
+    // Pages with perpetual background activity -- a heartbeat interval, an
+    // analytics beacon, an animating carousel driving rAF every frame -- never
+    // report a pending count of zero. The drain loop must give up on its own
+    // deadline instead of spinning forever while holding the tab lock.
+    jest.useFakeTimers();
+    try {
+      const trackerState = {
+        activeToken: 0,
+        // Never drains: mimics a page with a permanently live interval/rAF.
+        pendingCounts: new Map(),
+      };
+      const context = { route: jest.fn(async () => {}) };
+      const page = {
+        context: jest.fn(() => context),
+        on: jest.fn(),
+        addInitScript: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest.fn(async (fn, arg) => {
+          const source = String(fn);
+          if (source.includes('installActionTrackerScript')) return undefined;
+          if (source.includes('startAction')) {
+            trackerState.activeToken = arg;
+            return undefined;
+          }
+          if (source.includes('finishAction')) {
+            if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+            return undefined;
+          }
+          // Always busy, no matter how long the loop waits.
+          if (source.includes('getPendingCount')) return 1;
+          if (source.includes('getActiveToken')) return trackerState.activeToken || 0;
+          return undefined;
+        }),
+        waitForTimeout: jest.fn((ms) => new Promise((resolve) => setTimeout(resolve, ms === 0 ? 30 : ms))),
+      };
+
+      await createTabState(page);
+
+      let settled = false;
+      const action = withTabLock('busy-tab', () => withBlockedNavigationTracking(page, async () => 'result'))
+        .then((value) => {
+          settled = true;
+          return value;
+        });
+
+      // Well past the drain deadline: the loop must have given up by now.
+      await jest.advanceTimersByTimeAsync(10000);
+
+      await expect(action).resolves.toBe('result');
+      expect(settled).toBe(true);
+
+      // The lock must be free for the next caller, which is what the unbounded
+      // loop broke: the request timed out but the loop kept the lock forever.
+      let secondRan = false;
+      await withTabLock('busy-tab', async () => {
+        secondRan = true;
+      });
+      expect(secondRan).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('keeps action-scheduled RAF navigation attributed until the frame runs', async () => {
     let routeHandler;
     let nextRafId = 1;
