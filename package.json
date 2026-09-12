@@ -72,7 +72,7 @@
     "camoufox-js": "^0.8.5",
     "commander": "^14.0.0",
     "css-tree": "^3.2.1",
-    "express": "^4.18.2",
+    "express": "^5.2.1",
     "openapi-types": "^12.1.3",
     "playwright-core": "1.58.1",
     "swagger-ui-express": "^5.0.1"
@@ -92,6 +92,6 @@
     "argon2": "^0.41.1"
   },
   "overrides": {
-    "adm-zip": "0.6.0"
+    "adm-zip": "0.6.1"
   }
 }
