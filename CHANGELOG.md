@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Security
+- Update Express within the supported 4.x line, pin `adm-zip` to `0.6.1`, and refresh affected production dependencies to address current advisories while preserving request-body validation and array query parsing.
+
 ## [2.4.7] - 2026-08-13
 
 ### Added
