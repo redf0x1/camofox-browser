@@ -797,6 +797,154 @@ describe('validateUrl() network safety', () => {
     }
   });
 
+  test.each([
+    ['private', { address: '127.0.0.1', family: 4 }, 'abort'],
+    ['public', { address: '93.184.216.34', family: 4 }, 'continue'],
+  ])('fails closed when a tracked guard DNS lookup outlives the deadline and later resolves %s', async (_kind, dnsResult, routeMethod) => {
+    jest.useFakeTimers();
+    let resolveLookup;
+    try {
+      lookupMock.mockImplementation(
+        () => new Promise((resolve) => {
+          resolveLookup = resolve;
+        }),
+      );
+
+      let routeHandler;
+      let lateRoutePromise;
+      const trackerState = {
+        activeToken: 0,
+        pendingCounts: new Map(),
+      };
+      const lateRoute = {
+        request: () => ({
+          url: () => 'http://public-looking.example.test/resource',
+          isNavigationRequest: () => true,
+          frame: () => ({ page: () => page }),
+        }),
+        continue: jest.fn().mockResolvedValue(undefined),
+        abort: jest.fn().mockResolvedValue(undefined),
+      };
+      const context = {
+        route: jest.fn(async (_pattern, handler) => {
+          routeHandler = handler;
+        }),
+      };
+      const page = {
+        context: jest.fn(() => context),
+        on: jest.fn(),
+        addInitScript: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest.fn(async (fn, arg) => {
+          const source = String(fn);
+          if (source.includes('installActionTrackerScript')) return undefined;
+          if (source.includes('startAction')) {
+            trackerState.activeToken = arg;
+            return undefined;
+          }
+          if (source.includes('finishAction')) {
+            if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+            return undefined;
+          }
+          if (source.includes('getPendingCount')) return trackerState.pendingCounts.get(arg) || 0;
+          if (source.includes('getActiveToken')) return trackerState.activeToken || 0;
+          return undefined;
+        }),
+      };
+
+      await createTabState(page);
+      const firstAction = withTabLock('late-guard-tab', () => withBlockedNavigationTracking(page, async () => {
+        setTimeout(() => {
+          lateRoutePromise = routeHandler(lateRoute);
+        }, 0);
+        return 'first-result';
+      }));
+      const firstExpectation = expect(firstAction).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('did not settle'),
+      });
+
+      await jest.advanceTimersByTimeAsync(3100);
+      await firstExpectation;
+
+      const immediateAllowedAction = withTabLock('late-guard-tab', () =>
+        withBlockedNavigationTracking(page, async () => 'immediate-allowed'),
+      );
+      await jest.advanceTimersByTimeAsync(20);
+      await expect(immediateAllowedAction).resolves.toBe('immediate-allowed');
+
+      resolveLookup([dnsResult]);
+      await lateRoutePromise;
+      expect(lateRoute[routeMethod]).toHaveBeenCalledTimes(1);
+
+      const nextAllowedAction = withTabLock('late-guard-tab', () =>
+        withBlockedNavigationTracking(page, async () => 'next-allowed'),
+      );
+      await jest.advanceTimersByTimeAsync(20);
+      await expect(nextAllowedAction).resolves.toBe('next-allowed');
+    } finally {
+      resolveLookup?.([{ address: '93.184.216.34', family: 4 }]);
+      jest.useRealTimers();
+    }
+  });
+
+  test('fails closed and releases the tab lock when the pending-count page evaluation never settles', async () => {
+    jest.useFakeTimers();
+    try {
+      const trackerState = { activeToken: 0 };
+      const context = { route: jest.fn(async () => {}) };
+      const page = {
+        context: jest.fn(() => context),
+        on: jest.fn(),
+        addInitScript: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest.fn(async (fn, arg) => {
+          const source = String(fn);
+          if (source.includes('installActionTrackerScript')) return undefined;
+          if (source.includes('startAction')) {
+            trackerState.activeToken = arg;
+            return undefined;
+          }
+          if (source.includes('finishAction')) {
+            if (trackerState.activeToken === arg) trackerState.activeToken = 0;
+            return undefined;
+          }
+          if (source.includes('getPendingCount')) return new Promise(() => {});
+          if (source.includes('getActiveToken')) return trackerState.activeToken || 0;
+          return undefined;
+        }),
+      };
+
+      await createTabState(page);
+      let settled = false;
+      let rejection;
+      void withTabLock('stuck-pending-count-tab', () =>
+        withBlockedNavigationTracking(page, async () => 'unexpected-success'),
+      ).then(
+        () => {
+          settled = true;
+        },
+        (error) => {
+          settled = true;
+          rejection = error;
+        },
+      );
+
+      await jest.advanceTimersByTimeAsync(3100);
+      expect(settled).toBe(true);
+      expect(rejection).toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('did not settle'),
+      });
+
+      let nextRan = false;
+      await withTabLock('stuck-pending-count-tab', async () => {
+        nextRan = true;
+      });
+      expect(nextRan).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('keeps action-scheduled RAF navigation attributed until the frame runs', async () => {
     let routeHandler;
     let nextRafId = 1;
