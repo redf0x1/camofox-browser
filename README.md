@@ -249,12 +249,11 @@ camofox scroll <direction>             # Scroll up/down/left/right
 camofox select <ref> <value>           # Select dropdown option
 camofox hover <ref>                    # Hover over element
 camofox press <key>                    # Press keyboard key
-camofox drag <from> <to>               # Drag element to target
 
 # Navigation
 camofox go-back                        # Browser back
 camofox go-forward                     # Browser forward
-camofox search "query" --engine google # Search (14 engines supported)
+camofox search "query" --engine google # Search (8 engines supported)
 camofox eval "document.title"          # Execute JavaScript
 camofox wait <selector> [--timeout ms] # Wait for element
 ```
