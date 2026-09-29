@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Security
+- Upgrade `camoufox-js` to the first release with the patched `adm-zip` dependency range, so published installs no longer resolve the vulnerable `0.5.x` branch. Node.js 22+ is now required by the upstream runtime.
+
 ## [2.4.8] - 2026-09-22
 
 ### Security

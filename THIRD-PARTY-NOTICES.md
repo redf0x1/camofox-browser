@@ -18,10 +18,10 @@ The portable Windows distribution redistributes the following runtime components
 - The exact upstream tag states that its Windows/macOS bundled fonts are copyrighted and are not intended or permitted for redistribution. Those fonts are therefore not included in this portable distribution; Windows uses the fonts installed on the host system.
 - The exact Camoufox MPL-2.0 text is retained at `licenses/Camoufox-MPL-2.0.txt`, and the corresponding source is available from the exact source tag above.
 
-## camoufox-js 0.8.5
+## camoufox-js 0.11.5
 
 - Project: https://github.com/apify/camoufox-js
-- Source revision published by npm: https://github.com/apify/camoufox-js/tree/afce2afa1300f1a938c0eb04aae92ff73fcd2c5b
+- Source revision published by npm: https://github.com/apify/camoufox-js/tree/1e9af18d9856705546891483867eb0d53d37e0404
 - License: Mozilla Public License 2.0 (MPL-2.0).
 - The package license is retained under `app/node_modules/camoufox-js/`.
 

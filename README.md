@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](tsconfig.json)
-[![Node](https://img.shields.io/badge/Node-20%2B-green)](package.json)
+[![Node](https://img.shields.io/badge/Node-22%2B-green)](package.json)
 [![npm](https://img.shields.io/npm/v/camofox-browser)](https://www.npmjs.com/package/camofox-browser)
 
 ## Table of Contents
@@ -990,7 +990,7 @@ fly deploy
 
 ### System Requirements
 
-- Node.js 20+
+- Node.js 22+
 - 2GB+ RAM (browser + contexts require significant memory)
 - Linux recommended for production; macOS is fine for development
 
