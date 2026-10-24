@@ -4,6 +4,7 @@
 
 ### Security
 - Upgrade `camoufox-js` to the first release with the patched `adm-zip` dependency range, so published installs no longer resolve the vulnerable `0.5.x` branch.
+- Refresh the existing `body-parser`, `proxy-addr`, `brace-expansion` and `source-map-js` runtime dependencies to their patched releases.
 
 ### Breaking
 - Node.js 22+ is required by the updated runtime. Upgrade Node.js before installing; Node.js 20 is no longer supported.
