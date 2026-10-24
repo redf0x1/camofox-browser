@@ -3,7 +3,13 @@
 ## [Unreleased]
 
 ### Security
-- Upgrade `camoufox-js` to the first release with the patched `adm-zip` dependency range, so published installs no longer resolve the vulnerable `0.5.x` branch. Node.js 22+ is now required by the upstream runtime.
+- Upgrade `camoufox-js` to the first release with the patched `adm-zip` dependency range, so published installs no longer resolve the vulnerable `0.5.x` branch.
+
+### Breaking
+- Node.js 22+ is required by the updated runtime. Upgrade Node.js before installing; Node.js 20 is no longer supported.
+
+### Fixed
+- Update the Windows portable build and verifier to use the bundled `better-sqlite3` 13 prebuild with version, SHA-256 and architecture checks.
 
 ## [2.4.8] - 2026-09-22
 

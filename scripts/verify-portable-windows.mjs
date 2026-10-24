@@ -31,9 +31,8 @@ const betterSqliteNativeBinary = join(
   'app',
   'node_modules',
   'better-sqlite3',
-  'build',
-  'Release',
-  'better_sqlite3.node',
+  'prebuilds',
+  'win32-x64.node',
 );
 const mplLicense = join(bundleRoot, 'licenses', 'MPL-2.0.txt');
 const apacheLicense = join(bundleRoot, 'licenses', 'Apache-2.0.txt');

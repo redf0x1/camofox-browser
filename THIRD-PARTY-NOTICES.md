@@ -21,14 +21,14 @@ The portable Windows distribution redistributes the following runtime components
 ## camoufox-js 0.11.5
 
 - Project: https://github.com/apify/camoufox-js
-- Source revision published by npm: https://github.com/apify/camoufox-js/tree/1e9af18d9856705546891483867eb0d53d37e0404
+- Source revision for release: https://github.com/apify/camoufox-js/tree/1e9af18d9856705546891483867eb0d53d37e040
 - License: Mozilla Public License 2.0 (MPL-2.0).
 - The package license is retained under `app/node_modules/camoufox-js/`.
 
-## impit 0.7.6 / impit-win32-x64-msvc 0.7.6
+## impit 0.14.5 / impit-win32-x64-msvc 0.14.5
 
 - Project: https://github.com/apify/impit
-- Source revision published by npm: https://github.com/apify/impit/tree/be0331c1ea34349a6d97c5f269a4af1d21d783e7
+- Source: https://github.com/apify/impit/tree/js-0.14.5
 - License: Apache License 2.0.
 - The Windows x64 native package is required by `impit`, a runtime dependency of `camoufox-js`.
 - A copy of the Apache License 2.0 is retained in the portable bundle at `licenses/Apache-2.0.txt`.
