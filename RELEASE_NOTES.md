@@ -1,6 +1,14 @@
 # Release Notes
 
-## Unreleased
+## v2.4.9
+
+### Installation reliability and security
+
+Required engine installation failures now fail npm/Docker installation instead of producing a successful package or image with no browser. Downloads are streamed to disk and archives are extracted using platform tools, avoiding whole-archive memory buffers. Linux npm hosts need `python3`; supported macOS/Windows hosts use `tar`. Docker includes the required tools. Only the optional GeoLite database download remains warning-only.
+
+Existing caches and browser profiles are preserved. If an existing engine cache is incomplete or unsupported, choose a new, non-existing `CAMOUFOX_INSTALL_DIR` and run `npm run browser:install` from the package directory; do not delete browser profiles to repair a missing engine. `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` explicitly defers provisioning and does not establish runtime readiness.
+
+Published consumers now receive the patched `adm-zip` range from `camoufox-js`, not only a root-only npm override. Extraction subprocesses receive only explicit platform-path and locale environment variables. The REST API remains compatible with MCP/Gemini clients; no network-recording or screen-history feature is included.
 
 ### Node.js 22 upgrade
 

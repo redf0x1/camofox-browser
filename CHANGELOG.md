@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.4.9] - 2026-10-25
 
 ### Security
 - Upgrade `camoufox-js` to the first release with the patched `adm-zip` dependency range, so published installs no longer resolve the vulnerable `0.5.x` branch.
@@ -11,6 +11,7 @@
 
 ### Fixed
 - Fail npm/Docker installation when the required Camoufox engine download, extraction or executable validation fails; only optional GeoLite downloads remain warning-only.
+- Restrict extraction subprocesses to explicit platform-path and locale environment variables instead of inheriting unrelated host credentials.
 - Stream browser downloads to disk and extract with platform tools instead of whole-archive memory buffers; preserve existing caches and profiles and direct missing-engine recovery to installation.
 - Publish the existing repository `AGENTS.md` guide by removing its ignore rule.
 - Update the Windows portable build and verifier to use the bundled `better-sqlite3` 13 prebuild with version, SHA-256 and architecture checks.

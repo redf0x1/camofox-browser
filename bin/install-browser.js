@@ -7,15 +7,25 @@ const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { execFileSync } = require('node:child_process');
 
+// Extraction tools need platform paths and locale only, never npm/GitHub credentials.
+function extractionEnv() {
+  const env = {};
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'USERPROFILE', 'LANG', 'LC_ALL', 'LC_CTYPE']) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
+}
+
 // Use disk-backed platform tools, never AdmZip's whole-archive buffers.
 // Python is already a Docker dependency; macOS and supported Windows ship bsdtar.
 function extractZip(archive, destination, platform = process.platform) {
+  const options = { stdio: 'inherit', env: extractionEnv() };
   if (platform === 'linux') {
-    execFileSync('python3', ['-m', 'zipfile', '-e', archive, destination], { stdio: 'inherit' });
+    execFileSync('python3', ['-m', 'zipfile', '-e', archive, destination], options);
     // zipfile does not restore Unix executable bits. Match upstream's permissions.
-    execFileSync('chmod', ['-R', '755', destination], { stdio: 'inherit' });
+    execFileSync('chmod', ['-R', '755', destination], options);
   } else if (platform === 'darwin' || platform === 'win32') {
-    execFileSync('tar', ['-xf', archive, '-C', destination], { stdio: 'inherit' });
+    execFileSync('tar', ['-xf', archive, '-C', destination], options);
   } else {
     throw new Error(`Unsupported browser installation platform: ${platform}`);
   }

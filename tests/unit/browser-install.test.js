@@ -100,6 +100,33 @@ test('streamed download rejects HTTP and truncated bodies, and writes real respo
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }, 15000);
 
+test('extraction subprocesses receive platform paths but not unrelated host secrets', () => {
+  const childProcess = require('node:child_process');
+  const marker = 'CAMOFOX_REVIEW_SECRET_SENTINEL';
+  const previousMarker = process.env[marker];
+  const previousSystemRoot = process.env.SystemRoot;
+  const spy = jest.spyOn(childProcess, 'execFileSync').mockReturnValue(Buffer.alloc(0));
+  process.env[marker] = 'private-test-marker';
+  process.env.SystemRoot = 'C:\\WindowsFixture';
+  try {
+    jest.isolateModules(() => {
+      const installer = require('../../bin/install-browser');
+      for (const platform of ['linux', 'darwin', 'win32']) installer.extractZip('fixture.zip', 'destination', platform);
+    });
+    expect(spy.mock.calls.map(call => call[0])).toEqual(['python3', 'chmod', 'tar', 'tar']);
+    for (const [, , options] of spy.mock.calls) {
+      expect(options.env).toBeDefined();
+      expect(options.env[marker]).toBeUndefined();
+      expect(options.env.SystemRoot).toBe('C:\\WindowsFixture');
+      expect(options.env.PATH).toBe(process.env.PATH);
+    }
+  } finally {
+    spy.mockRestore();
+    if (previousMarker === undefined) delete process.env[marker]; else process.env[marker] = previousMarker;
+    if (previousSystemRoot === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = previousSystemRoot;
+  }
+});
+
 test('real disk-backed extraction works and corrupt ZIP extraction rejects', () => {
   if (process.platform === 'win32') return; // Fixture generation needs Python; Windows tar is exercised by release CI.
   const archive = path.join(root, 'fixture.zip');
