@@ -36,7 +36,7 @@
     "headless-browser"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "files": [
     "dist",
@@ -69,7 +69,7 @@
     "postinstall": "npx camoufox-js fetch || true"
   },
   "dependencies": {
-    "camoufox-js": "^0.8.5",
+    "camoufox-js": "^0.11.4",
     "commander": "^14.0.0",
     "css-tree": "^3.2.1",
     "express": "^4.22.3",

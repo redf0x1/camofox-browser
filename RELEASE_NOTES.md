@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### Node.js 22 upgrade
+
+The updated runtime requires Node.js 22 or newer. Before upgrading an npm installation, switch to a supported Node.js version and confirm it with `node --version`. If installation or startup reports an unsupported engine, reinstall dependencies using Node.js 22+ and restart the server with that runtime. The Windows portable package includes the required Node.js runtime.
+
 ## Preview Governance
 
 CamoFox Browser Server is in **Preview** (Phase 1). See [Preview Status](README.md#preview-status) in README for commitments and non-goals.

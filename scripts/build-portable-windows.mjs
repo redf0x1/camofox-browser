@@ -27,11 +27,8 @@ const NODE_ARCHIVE = `node-${NODE_VERSION}-win-x64.zip`;
 const NODE_URL = `https://nodejs.org/download/release/${NODE_VERSION}/${NODE_ARCHIVE}`;
 const NODE_SHA256 = '1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97';
 
-const BETTER_SQLITE_VERSION = '12.6.2';
-const BETTER_SQLITE_ARCHIVE = 'better-sqlite3-v12.6.2-node-v127-win32-x64.tar.gz';
-const BETTER_SQLITE_URL = `https://github.com/WiseLibs/better-sqlite3/releases/download/v${BETTER_SQLITE_VERSION}/${BETTER_SQLITE_ARCHIVE}`;
-const BETTER_SQLITE_SHA256 = '2609fd25d59c4c16b43758c1fb2b4afa653925e04941cadae5be28f2d6cd2dc8';
-const BETTER_SQLITE_BINARY_SHA256 = 'f83faac0db0c2737b259073402d83e05eafdde7ff046582ecee280a66056586e';
+const BETTER_SQLITE_VERSION = '13.0.3';
+const BETTER_SQLITE_BINARY_SHA256 = 'e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a';
 
 const CAMOUFOX_VERSION = '152.0.4';
 const CAMOUFOX_RELEASE = 'beta.28';
@@ -161,10 +158,6 @@ function extractZip(archivePath, destination) {
   run('tar', ['-xf', archivePath, '-C', destination]);
 }
 
-function extractTarGz(archivePath, destination) {
-  run('tar', ['-xzf', archivePath, '-C', destination]);
-}
-
 function copyAppRuntime(appDir) {
   const paths = [
     'dist',
@@ -283,10 +276,8 @@ async function main() {
 
   const nodeArchivePath = join(CACHE_DIR, NODE_ARCHIVE);
   const camoufoxArchivePath = join(CACHE_DIR, CAMOUFOX_ARCHIVE);
-  const betterSqliteArchivePath = join(CACHE_DIR, BETTER_SQLITE_ARCHIVE);
   await downloadPinned(NODE_URL, nodeArchivePath, NODE_SHA256);
   await downloadPinned(CAMOUFOX_URL, camoufoxArchivePath, CAMOUFOX_SHA256);
-  await downloadPinned(BETTER_SQLITE_URL, betterSqliteArchivePath, BETTER_SQLITE_SHA256);
 
   console.log('=== Compose portable bundle ===');
   rmSync(BUNDLE_DIR, { recursive: true, force: true });
@@ -341,8 +332,7 @@ async function main() {
       `Portable runtime better-sqlite3 version ${betterSqlitePackage.version} does not match pinned prebuild ${BETTER_SQLITE_VERSION}`,
     );
   }
-  extractTarGz(betterSqliteArchivePath, betterSqliteDir);
-  const betterSqliteBinary = join(betterSqliteDir, 'build', 'Release', 'better_sqlite3.node');
+  const betterSqliteBinary = join(betterSqliteDir, 'prebuilds', 'win32-x64.node');
   if (!existsSync(betterSqliteBinary)) {
     throw new Error('Portable runtime is missing better-sqlite3 Windows x64 native binary');
   }

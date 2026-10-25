@@ -81,7 +81,7 @@ Protected endpoints require `Authorization: Bearer $CAMOFOX_API_KEY` only when `
 Most core success responses are structured as JSON, commonly including `ok: true` on action-style endpoints.
 
 ## Stack
-- Runtime: Node.js 20+
+- Runtime: Node.js 22+
 - Language: TypeScript (strict)
 - Server: Express
 - CLI: Commander.js

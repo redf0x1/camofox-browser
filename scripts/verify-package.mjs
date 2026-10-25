@@ -13,8 +13,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const EXPECTED_NODE_FLOOR = '20';
+const EXPECTED_NODE_FLOOR = '22';
 const EXPECTED_PLAYWRIGHT_CORE = '1.58.1';
+const EXPECTED_ADM_ZIP = '0.6.1';
 const EXPECTED_BINS = ['camofox', 'camofox-browser'];
 const EXPECTED_FILES = [
   'package.json',
@@ -173,6 +174,24 @@ try {
   ).version;
   if (installedPlaywright === EXPECTED_PLAYWRIGHT_CORE) pass(`playwright-core resolved to ${EXPECTED_PLAYWRIGHT_CORE}`);
   else fail(`playwright-core resolved to ${installedPlaywright}, expected ${EXPECTED_PLAYWRIGHT_CORE}`);
+
+  const dependencyTree = JSON.parse(
+    runNpm(['ls', 'adm-zip', '--all', '--json'], { cwd: tempRoot, capture: true }),
+  );
+  const admZipVersions = [];
+  const collectAdmZipVersions = (node) => {
+    for (const [name, dependency] of Object.entries(node.dependencies ?? {})) {
+      if (name === 'adm-zip' && dependency.version) admZipVersions.push(dependency.version);
+      collectAdmZipVersions(dependency);
+    }
+  };
+  collectAdmZipVersions(dependencyTree);
+  const uniqueAdmZipVersions = [...new Set(admZipVersions)];
+  if (uniqueAdmZipVersions.length === 1 && uniqueAdmZipVersions[0] === EXPECTED_ADM_ZIP) {
+    pass(`adm-zip dependency tree resolved to ${EXPECTED_ADM_ZIP}`);
+  } else {
+    fail(`adm-zip dependency tree resolved to ${uniqueAdmZipVersions.join(', ') || 'nothing'}, expected only ${EXPECTED_ADM_ZIP}`);
+  }
 
   if (existsSync(join(installedRoot, 'plugin.ts'))) pass('plugin.ts accessible in installed package');
   else fail('plugin.ts not found in installed package');
