@@ -14,6 +14,8 @@
 - Restrict extraction subprocesses to explicit platform-path and locale environment variables instead of inheriting unrelated host credentials.
 - Stream browser downloads to disk and extract with platform tools instead of whole-archive memory buffers; preserve existing caches and profiles and direct missing-engine recovery to installation.
 - Publish the existing repository `AGENTS.md` guide by removing its ignore rule.
+- Preserve the upstream SQLite prebuild opt-out metadata in the lockfile so clean npm installs do not unnecessarily invoke a native compiler.
+- Use built-in PowerShell/.NET ZIP extraction on Windows to handle filenames in newer engine archives, with Unicode, spaced-path and corrupt-archive regression coverage.
 - Update the Windows portable build and verifier to use the bundled `better-sqlite3` 13 prebuild with version, SHA-256 and architecture checks.
 
 ## [2.4.8] - 2026-09-22

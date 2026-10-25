@@ -9,7 +9,7 @@
 5. Test: `npm test`
 6. Lint: `npm run lint`
 
-Install requires Python 3 on Linux, or the system `tar` on macOS/Windows, for
+Install requires Python 3 on Linux, the system `tar` on macOS, or built-in PowerShell/.NET ZIP support on Windows, for
 disk-backed browser extraction. For source-only checks, set
 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` during dependency installation, then unset it
 and run `npm run browser:install` before browser tests. See README for cache recovery;

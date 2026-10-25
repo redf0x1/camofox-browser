@@ -107,8 +107,8 @@ Supported sidecars include limited forward-migration paths (e.g., fingerprint v0
 
 Requires Node.js 22+. Browser installation runs during `npm install` and fails if the
 required engine cannot be downloaded, extracted, or validated. Downloads are streamed
-to disk; extraction uses Python 3 on Linux (install `python3` first) and the system
-`tar` on macOS/Windows. Keep sufficient disk space for both the ZIP and extracted engine.
+to disk; extraction uses Python 3 on Linux (install `python3` first), system `tar` on
+macOS, and built-in PowerShell/.NET ZIP support on Windows. Keep sufficient disk space for both the ZIP and extracted engine.
 Docker installs the engine once using the same installer. Optional GeoLite download
 failures only produce a warning.
 

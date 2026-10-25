@@ -17,15 +17,23 @@ function extractionEnv() {
 }
 
 // Use disk-backed platform tools, never AdmZip's whole-archive buffers.
-// Python is already a Docker dependency; macOS and supported Windows ship bsdtar.
+// Python is already a Docker dependency; macOS ships bsdtar and Windows ships PowerShell/.NET ZIP support.
 function extractZip(archive, destination, platform = process.platform) {
   const options = { stdio: 'inherit', env: extractionEnv() };
   if (platform === 'linux') {
     execFileSync('python3', ['-m', 'zipfile', '-e', archive, destination], options);
     // zipfile does not restore Unix executable bits. Match upstream's permissions.
     execFileSync('chmod', ['-R', '755', destination], options);
-  } else if (platform === 'darwin' || platform === 'win32') {
+  } else if (platform === 'darwin') {
     execFileSync('tar', ['-xf', archive, '-C', destination], options);
+  } else if (platform === 'win32') {
+    // Native tar rejects some filenames in newer upstream Windows archives.
+    // Keep paths out of the PowerShell program so quotes/metacharacters remain data.
+    execFileSync('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; " +
+        '[System.IO.Compression.ZipFile]::ExtractToDirectory($env:CAMOFOX_ARCHIVE_PATH, $env:CAMOFOX_EXTRACT_DIR)',
+    ], { ...options, env: { ...options.env, CAMOFOX_ARCHIVE_PATH: archive, CAMOFOX_EXTRACT_DIR: destination } });
   } else {
     throw new Error(`Unsupported browser installation platform: ${platform}`);
   }

@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const { spawnSync, execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const { installBrowser, installGeoLite, extractZip, download, main } = require('../../bin/install-browser');
 
 let root;
@@ -109,11 +109,17 @@ test('extraction subprocesses receive platform paths but not unrelated host secr
   process.env[marker] = 'private-test-marker';
   process.env.SystemRoot = 'C:\\WindowsFixture';
   try {
+    const archive = "fixture ' & $(must-remain-data).zip";
+    const destination = 'destination with spaces';
     jest.isolateModules(() => {
       const installer = require('../../bin/install-browser');
-      for (const platform of ['linux', 'darwin', 'win32']) installer.extractZip('fixture.zip', 'destination', platform);
+      for (const platform of ['linux', 'darwin', 'win32']) installer.extractZip(archive, destination, platform);
     });
-    expect(spy.mock.calls.map(call => call[0])).toEqual(['python3', 'chmod', 'tar', 'tar']);
+    expect(spy.mock.calls.map(call => call[0])).toEqual(['python3', 'chmod', 'tar', 'powershell.exe']);
+    const [, windowsArgs, windowsOptions] = spy.mock.calls[3];
+    expect(windowsArgs.join(' ')).not.toContain(archive);
+    expect(windowsOptions.env.CAMOFOX_ARCHIVE_PATH).toBe(archive);
+    expect(windowsOptions.env.CAMOFOX_EXTRACT_DIR).toBe(destination);
     for (const [, , options] of spy.mock.calls) {
       expect(options.env).toBeDefined();
       expect(options.env[marker]).toBeUndefined();
@@ -128,12 +134,16 @@ test('extraction subprocesses receive platform paths but not unrelated host secr
 });
 
 test('real disk-backed extraction works and corrupt ZIP extraction rejects', () => {
-  if (process.platform === 'win32') return; // Fixture generation needs Python; Windows tar is exercised by release CI.
-  const archive = path.join(root, 'fixture.zip');
-  execFileSync('python3', ['-c', "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1], 'w',zipfile.ZIP_DEFLATED); z.writestr('nested/payload', b'A'*3000000); z.close()", archive]);
-  const output = path.join(root, 'output'); fs.mkdirSync(output);
+  const archive = path.join(root, "fixture ' with spaces.zip");
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip();
+  zip.addFile('nested/payload', Buffer.alloc(3000000, 65));
+  zip.addFile('nested/ảnh-雪.txt', Buffer.from('Unicode fixture'));
+  zip.writeZip(archive);
+  const output = path.join(root, 'output with spaces'); fs.mkdirSync(output);
   extractZip(archive, output);
   expect(fs.statSync(path.join(output, 'nested/payload')).size).toBe(3000000);
+  expect(fs.readFileSync(path.join(output, 'nested/ảnh-雪.txt'), 'utf8')).toBe('Unicode fixture');
   fs.writeFileSync(archive, 'corrupt');
   expect(() => extractZip(archive, output)).toThrow();
 });

@@ -4,7 +4,7 @@
 
 ### Installation reliability and security
 
-Required engine installation failures now fail npm/Docker installation instead of producing a successful package or image with no browser. Downloads are streamed to disk and archives are extracted using platform tools, avoiding whole-archive memory buffers. Linux npm hosts need `python3`; supported macOS/Windows hosts use `tar`. Docker includes the required tools. Only the optional GeoLite database download remains warning-only.
+Required engine installation failures now fail npm/Docker installation instead of producing a successful package or image with no browser. Downloads are streamed to disk and archives are extracted using platform tools, avoiding whole-archive memory buffers. Linux npm hosts need `python3`; macOS uses system `tar`, and supported Windows hosts use built-in PowerShell/.NET ZIP extraction. Docker includes the required tools. Only the optional GeoLite database download remains warning-only.
 
 Existing caches and browser profiles are preserved. If an existing engine cache is incomplete or unsupported, choose a new, non-existing `CAMOUFOX_INSTALL_DIR` and run `npm run browser:install` from the package directory; do not delete browser profiles to repair a missing engine. `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` explicitly defers provisioning and does not establish runtime readiness.
 
