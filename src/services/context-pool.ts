@@ -459,7 +459,8 @@ export class ContextPool {
 			if (currentVersion === 'unknown') {
 				throw new Error(
 					`Cannot verify profile compatibility for user "${userId}": installed Camoufox version could not be determined. ` +
-					`Resolve the camoufox-js installation or delete the profile directory to reset: ${profileDir}`,
+					`Run npm run browser:install from the camofox-browser installation directory to provision the engine. ` +
+					`Keep the existing profile directory: ${profileDir}`,
 				);
 			}
 

@@ -40,15 +40,17 @@ RUN curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION
 COPY package*.json ./
 RUN chown -R node:node /app
 USER node
-RUN npm ci --omit=dev
+# Defer only our browser download; retain dependency/native install scripts.
+COPY --chown=node:node bin/install-browser.js ./bin/install-browser.js
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --omit=dev
 
 # Copy built output
 COPY --from=builder --chown=node:node /app/dist/ ./dist/
 COPY --from=builder --chown=node:node /app/plugin.ts ./
 COPY --from=builder --chown=node:node /app/openclaw.plugin.json ./
 
-# Pre-download Camoufox browser binary (~300MB); GeoLite fetch can fail transiently
-RUN npx --yes camoufox-js fetch || true
+# Required engine installation uses disk-backed extraction; only GeoLite is optional.
+RUN npm run browser:install
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3     CMD curl -f http://localhost:9377/health || exit 1

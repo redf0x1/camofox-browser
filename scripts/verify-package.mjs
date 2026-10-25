@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -25,6 +26,7 @@ const EXPECTED_FILES = [
   'THIRD-PARTY-NOTICES.md',
   'plugin.ts',
   'openclaw.plugin.json',
+  'bin/install-browser.js',
 ];
 const EXPECTED_DIRS = ['dist', 'bin'];
 
@@ -120,6 +122,29 @@ try {
   const installedRoot = join(tempRoot, 'node_modules', 'camofox-browser');
   const manifest = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8'));
   const pluginManifest = JSON.parse(readFileSync(join(installedRoot, 'openclaw.plugin.json'), 'utf8'));
+
+  // Exercise the shipped lifecycle entry without touching the user's browser cache.
+  const isolatedCache = join(tempRoot, 'browser-cache');
+  const installer = join(installedRoot, 'bin', 'install-browser.js');
+  const skippedInstall = spawnSync(process.execPath, [installer], {
+    cwd: installedRoot,
+    env: { PATH: process.env.PATH, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1', CAMOUFOX_INSTALL_DIR: isolatedCache },
+    encoding: 'utf8',
+  });
+  if (skippedInstall.status === 0 && skippedInstall.stdout.includes('Skipping browser installation') && !existsSync(isolatedCache)) {
+    pass('Shipped installer explicitly skips without modifying browser cache');
+  } else fail(`Shipped installer skip failed: ${skippedInstall.stderr}`);
+  mkdirSync(isolatedCache);
+  writeFileSync(join(isolatedCache, 'preserve.txt'), 'existing-cache');
+  const rejectedInstall = spawnSync(process.execPath, [installer], {
+    cwd: installedRoot,
+    env: { PATH: process.env.PATH, CAMOUFOX_INSTALL_DIR: isolatedCache },
+    encoding: 'utf8',
+  });
+  if (rejectedInstall.status === 1 && rejectedInstall.stderr.includes('has been preserved') &&
+      readFileSync(join(isolatedCache, 'preserve.txt'), 'utf8') === 'existing-cache') {
+    pass('Shipped installer exits nonzero and preserves an incomplete existing cache');
+  } else fail(`Shipped installer validation failed: ${rejectedInstall.stderr}`);
 
   if (String(manifest.engines?.node ?? '').includes(`>=${EXPECTED_NODE_FLOOR}`)) {
     pass(`Node floor: ${manifest.engines.node}`);
