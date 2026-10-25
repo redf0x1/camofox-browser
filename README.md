@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](tsconfig.json)
-[![Node](https://img.shields.io/badge/Node-20%2B-green)](package.json)
+[![Node](https://img.shields.io/badge/Node-22%2B-green)](package.json)
 [![npm](https://img.shields.io/npm/v/camofox-browser)](https://www.npmjs.com/package/camofox-browser)
 
 ## Table of Contents
@@ -104,6 +104,22 @@ Supported sidecars include limited forward-migration paths (e.g., fingerprint v0
 ## Quick Start
 
 ### From Source
+
+Requires Node.js 22+. Browser installation runs during `npm install` and fails if the
+required engine cannot be downloaded, extracted, or validated. Downloads are streamed
+to disk; extraction uses Python 3 on Linux (install `python3` first), system `tar` on
+macOS, and built-in PowerShell/.NET ZIP support on Windows. Keep sufficient disk space for both the ZIP and extracted engine.
+Docker installs the engine once using the same installer. Optional GeoLite download
+failures only produce a warning.
+
+Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` only when deliberately deferring browser
+provisioning (for example, a source-only CI build or an existing portable bundle).
+Before launching, run `npm run browser:install` from the package directory with that
+variable unset. A supported cache with a nonempty executable is reused without a
+network update check. `CAMOUFOX_INSTALL_DIR` selects the cache directory. Existing
+incomplete/unsupported caches are preserved and rejected: choose a new path with
+`CAMOUFOX_INSTALL_DIR` to install afresh, and retain the old cache for diagnosis.
+Missing engine/version errors require engine installation, **not deleting profiles**.
 
 ```bash
 git clone https://github.com/redf0x1/camofox-browser.git
@@ -990,7 +1006,7 @@ fly deploy
 
 ### System Requirements
 
-- Node.js 20+
+- Node.js 22+
 - 2GB+ RAM (browser + contexts require significant memory)
 - Linux recommended for production; macOS is fine for development
 

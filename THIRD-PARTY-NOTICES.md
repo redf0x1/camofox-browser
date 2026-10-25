@@ -18,17 +18,17 @@ The portable Windows distribution redistributes the following runtime components
 - The exact upstream tag states that its Windows/macOS bundled fonts are copyrighted and are not intended or permitted for redistribution. Those fonts are therefore not included in this portable distribution; Windows uses the fonts installed on the host system.
 - The exact Camoufox MPL-2.0 text is retained at `licenses/Camoufox-MPL-2.0.txt`, and the corresponding source is available from the exact source tag above.
 
-## camoufox-js 0.8.5
+## camoufox-js 0.11.5
 
 - Project: https://github.com/apify/camoufox-js
-- Source revision published by npm: https://github.com/apify/camoufox-js/tree/afce2afa1300f1a938c0eb04aae92ff73fcd2c5b
+- Source revision for release: https://github.com/apify/camoufox-js/tree/1e9af18d9856705546891483867eb0d53d37e040
 - License: Mozilla Public License 2.0 (MPL-2.0).
 - The package license is retained under `app/node_modules/camoufox-js/`.
 
-## impit 0.7.6 / impit-win32-x64-msvc 0.7.6
+## impit 0.14.5 / impit-win32-x64-msvc 0.14.5
 
 - Project: https://github.com/apify/impit
-- Source revision published by npm: https://github.com/apify/impit/tree/be0331c1ea34349a6d97c5f269a4af1d21d783e7
+- Source: https://github.com/apify/impit/tree/js-0.14.5
 - License: Apache License 2.0.
 - The Windows x64 native package is required by `impit`, a runtime dependency of `camoufox-js`.
 - A copy of the Apache License 2.0 is retained in the portable bundle at `licenses/Apache-2.0.txt`.

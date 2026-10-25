@@ -61,7 +61,7 @@ describe('context-pool unknown version blocking', () => {
 		const { ContextPool } = require('../../dist/src/services/context-pool');
 		const pool = new ContextPool();
 
-		await expect(pool.ensureContext('test-user')).rejects.toThrow(/Camoufox version could not be determined/);
+		await expect(pool.ensureContext('test-user')).rejects.toThrow(/npm run browser:install.*Keep the existing profile directory/);
 		expect(mockLaunchPersistentContext).not.toHaveBeenCalled();
 	});
 });

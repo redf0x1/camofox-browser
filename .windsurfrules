@@ -62,6 +62,6 @@ SEARCH MACROS
 @google_search,@youtube_search,@amazon_search,@reddit_search,@reddit_subreddit,@wikipedia_search,@twitter_search,@yelp_search,@spotify_search,@netflix_search,@linkedin_search,@instagram_search,@tiktok_search,@twitch_search
 
 STACK + AUTH
-Node 20+, TypeScript strict, Express, Commander.js, Jest, Camoufox engine; API key optional (`CAMOFOX_API_KEY`), auth vault uses encrypted local storage.
+Node 22+, TypeScript strict, Express, Commander.js, Jest, Camoufox engine; API key optional (`CAMOFOX_API_KEY`), auth vault uses encrypted local storage.
 
 See AGENTS.md for full command, endpoint, and workflow specification.

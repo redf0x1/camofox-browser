@@ -58,22 +58,44 @@ describe('Windows portable build process invocation', () => {
     expect(builder).toContain('20535828272932407c2f5172aeb714ac7b374a34e5ecb1825af509f2902cde54');
   });
 
-  test('pins and verifies the exact better-sqlite3 Windows x64 prebuild before installation', () => {
+  test('verifies the Windows x64 prebuild shipped by the locked better-sqlite3 release', () => {
     const builder = fs.readFileSync(
       path.join(__dirname, '../../scripts/build-portable-windows.mjs'),
       'utf8',
     );
 
-    expect(builder).toContain('better-sqlite3-v12.6.2-node-v127-win32-x64.tar.gz');
-    expect(builder).toContain('2609fd25d59c4c16b43758c1fb2b4afa653925e04941cadae5be28f2d6cd2dc8');
-    expect(builder).toContain('f83faac0db0c2737b259073402d83e05eafdde7ff046582ecee280a66056586e');
-    expect(builder).toContain(
-      'await downloadPinned(BETTER_SQLITE_URL, betterSqliteArchivePath, BETTER_SQLITE_SHA256);',
+    const verifier = fs.readFileSync(
+      path.join(__dirname, '../../scripts/verify-portable-windows.mjs'),
+      'utf8',
     );
-    expect(builder).toContain('extractTarGz(betterSqliteArchivePath, betterSqliteDir);');
+    const lock = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '../../package-lock.json'), 'utf8'),
+    );
+
+    expect(builder).toContain(
+      `const BETTER_SQLITE_VERSION = '${lock.packages['node_modules/better-sqlite3'].version}';`,
+    );
+    expect(builder).toContain("join(betterSqliteDir, 'prebuilds', 'win32-x64.node')");
+    expect(verifier).toMatch(/'prebuilds',\s*'win32-x64\.node'/);
+    expect(builder).not.toContain('BETTER_SQLITE_URL');
     expect(builder).toContain(
       'await verifySha256(betterSqliteBinary, BETTER_SQLITE_BINARY_SHA256);',
     );
+    expect(builder).toContain("assertWindowsX64Pe(betterSqliteBinary, 'better-sqlite3 native module');");
     expect(builder).not.toContain('const prebuildInstall =');
+  });
+
+  test('pins the hash of the published better-sqlite3 Windows binary', () => {
+    const { createHash } = require('node:crypto');
+    const builder = fs.readFileSync(
+      path.join(__dirname, '../../scripts/build-portable-windows.mjs'),
+      'utf8',
+    );
+    const binary = fs.readFileSync(
+      path.join(__dirname, '../../node_modules/better-sqlite3/prebuilds/win32-x64.node'),
+    );
+    const hash = createHash('sha256').update(binary).digest('hex');
+
+    expect(builder).toContain(`const BETTER_SQLITE_BINARY_SHA256 = '${hash}';`);
   });
 });

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -13,8 +14,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const EXPECTED_NODE_FLOOR = '20';
+const EXPECTED_NODE_FLOOR = '22';
 const EXPECTED_PLAYWRIGHT_CORE = '1.58.1';
+const EXPECTED_ADM_ZIP = '0.6.1';
 const EXPECTED_BINS = ['camofox', 'camofox-browser'];
 const EXPECTED_FILES = [
   'package.json',
@@ -24,6 +26,7 @@ const EXPECTED_FILES = [
   'THIRD-PARTY-NOTICES.md',
   'plugin.ts',
   'openclaw.plugin.json',
+  'bin/install-browser.js',
 ];
 const EXPECTED_DIRS = ['dist', 'bin'];
 
@@ -120,6 +123,29 @@ try {
   const manifest = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8'));
   const pluginManifest = JSON.parse(readFileSync(join(installedRoot, 'openclaw.plugin.json'), 'utf8'));
 
+  // Exercise the shipped lifecycle entry without touching the user's browser cache.
+  const isolatedCache = join(tempRoot, 'browser-cache');
+  const installer = join(installedRoot, 'bin', 'install-browser.js');
+  const skippedInstall = spawnSync(process.execPath, [installer], {
+    cwd: installedRoot,
+    env: { PATH: process.env.PATH, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1', CAMOUFOX_INSTALL_DIR: isolatedCache },
+    encoding: 'utf8',
+  });
+  if (skippedInstall.status === 0 && skippedInstall.stdout.includes('Skipping browser installation') && !existsSync(isolatedCache)) {
+    pass('Shipped installer explicitly skips without modifying browser cache');
+  } else fail(`Shipped installer skip failed: ${skippedInstall.stderr}`);
+  mkdirSync(isolatedCache);
+  writeFileSync(join(isolatedCache, 'preserve.txt'), 'existing-cache');
+  const rejectedInstall = spawnSync(process.execPath, [installer], {
+    cwd: installedRoot,
+    env: { PATH: process.env.PATH, CAMOUFOX_INSTALL_DIR: isolatedCache },
+    encoding: 'utf8',
+  });
+  if (rejectedInstall.status === 1 && rejectedInstall.stderr.includes('has been preserved') &&
+      readFileSync(join(isolatedCache, 'preserve.txt'), 'utf8') === 'existing-cache') {
+    pass('Shipped installer exits nonzero and preserves an incomplete existing cache');
+  } else fail(`Shipped installer validation failed: ${rejectedInstall.stderr}`);
+
   if (String(manifest.engines?.node ?? '').includes(`>=${EXPECTED_NODE_FLOOR}`)) {
     pass(`Node floor: ${manifest.engines.node}`);
   } else {
@@ -173,6 +199,24 @@ try {
   ).version;
   if (installedPlaywright === EXPECTED_PLAYWRIGHT_CORE) pass(`playwright-core resolved to ${EXPECTED_PLAYWRIGHT_CORE}`);
   else fail(`playwright-core resolved to ${installedPlaywright}, expected ${EXPECTED_PLAYWRIGHT_CORE}`);
+
+  const dependencyTree = JSON.parse(
+    runNpm(['ls', 'adm-zip', '--all', '--json'], { cwd: tempRoot, capture: true }),
+  );
+  const admZipVersions = [];
+  const collectAdmZipVersions = (node) => {
+    for (const [name, dependency] of Object.entries(node.dependencies ?? {})) {
+      if (name === 'adm-zip' && dependency.version) admZipVersions.push(dependency.version);
+      collectAdmZipVersions(dependency);
+    }
+  };
+  collectAdmZipVersions(dependencyTree);
+  const uniqueAdmZipVersions = [...new Set(admZipVersions)];
+  if (uniqueAdmZipVersions.length === 1 && uniqueAdmZipVersions[0] === EXPECTED_ADM_ZIP) {
+    pass(`adm-zip dependency tree resolved to ${EXPECTED_ADM_ZIP}`);
+  } else {
+    fail(`adm-zip dependency tree resolved to ${uniqueAdmZipVersions.join(', ') || 'nothing'}, expected only ${EXPECTED_ADM_ZIP}`);
+  }
 
   if (existsSync(join(installedRoot, 'plugin.ts'))) pass('plugin.ts accessible in installed package');
   else fail('plugin.ts not found in installed package');

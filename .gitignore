@@ -46,7 +46,6 @@ playwright-report/
 .claude
 .commander
 CLAUDE.md
-AGENTS.md
 production
 docs/*
 .agents

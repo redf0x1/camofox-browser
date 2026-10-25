@@ -5,7 +5,7 @@ Tooling workflow instructions belong in `AGENTS.md`.
 
 ## Language & Framework Style
 - Use TypeScript with `strict` settings enabled.
-- Keep runtime target aligned with Node.js 20+.
+- Keep runtime target aligned with Node.js 22+.
 - Use Express route handlers with explicit request/response typings.
 - Use Commander.js for CLI command registration.
 - Use Jest for tests and test naming consistency.

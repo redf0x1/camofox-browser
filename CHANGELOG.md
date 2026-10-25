@@ -1,6 +1,22 @@
 # Changelog
 
-## [Unreleased]
+## [2.4.9] - 2026-10-25
+
+### Security
+- Upgrade `camoufox-js` to the first release with the patched `adm-zip` dependency range, so published installs no longer resolve the vulnerable `0.5.x` branch.
+- Refresh the existing `body-parser`, `proxy-addr`, `brace-expansion` and `source-map-js` runtime dependencies to their patched releases.
+
+### Breaking
+- Node.js 22+ is required by the updated runtime. Upgrade Node.js before installing; Node.js 20 is no longer supported.
+
+### Fixed
+- Fail npm/Docker installation when the required Camoufox engine download, extraction or executable validation fails; only optional GeoLite downloads remain warning-only.
+- Restrict extraction subprocesses to explicit platform-path and locale environment variables instead of inheriting unrelated host credentials.
+- Stream browser downloads to disk and extract with platform tools instead of whole-archive memory buffers; preserve existing caches and profiles and direct missing-engine recovery to installation.
+- Publish the existing repository `AGENTS.md` guide by removing its ignore rule.
+- Preserve the upstream SQLite prebuild opt-out metadata in the lockfile so clean npm installs do not unnecessarily invoke a native compiler.
+- Use built-in PowerShell/.NET ZIP extraction on Windows to handle filenames in newer engine archives, with Unicode, spaced-path and corrupt-archive regression coverage.
+- Update the Windows portable build and verifier to use the bundled `better-sqlite3` 13 prebuild with version, SHA-256 and architecture checks.
 
 ## [2.4.8] - 2026-09-22
 
