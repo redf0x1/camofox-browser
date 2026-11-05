@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Add opt-in, bounded network metadata capture from first navigation, explicit session tab enrollment, paginated request inspection, and sanitized HAR 1.2 export. Add opt-in bounded text response bodies, exact-match abort, and static mocks for fetch/XHR.
+
 ## [2.4.9] - 2026-10-25
 
 ### Security

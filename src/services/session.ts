@@ -11,6 +11,7 @@ import { contextPool, type PoolEntry } from './context-pool';
 import { cleanupUserDownloads } from './download';
 import { decrementActiveOps, incrementActiveOps, deleteUserHealth } from './health';
 import { stopVnc } from './vnc';
+import { clearNetworkCaptures, detachNetworkCaptureTab } from './network-capture';
 import { cleanupTracing } from './tracing';
 
 const CONFIG = loadConfig();
@@ -922,8 +923,7 @@ export function unindexSessionTabs(session: SessionData): void {
 	if (!session) return;
 	for (const [, group] of session.tabGroups) {
 		for (const tabId of group.keys()) {
-			tabSessionIndex.delete(tabId);
-			clearTabLock(tabId);
+			unindexTab(tabId);
 		}
 	}
 }
@@ -1208,11 +1208,13 @@ export function indexTab(tabId: string, sessionKey: string): void {
 }
 
 export function unindexTab(tabId: string): void {
+	detachNetworkCaptureTab(tabId);
 	tabSessionIndex.delete(tabId);
 	clearTabLock(tabId);
 }
 
 export function clearAllState(): void {
+	clearNetworkCaptures();
 	for (const [sessionKey] of sessionRebindReservations) {
 		cancelSessionRebindReservation(sessionKey, new Error('Session state cleared'));
 	}

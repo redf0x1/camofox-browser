@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { resolve } from 'node:path';
 import type { OpenAPIV3_1 } from 'openapi-types';
+import { networkCaptureOptions, networkKeyResponse, networkPaths } from './network';
 
 /**
  * OpenAPI 3.1.0 specification for Camofox Browser API
@@ -55,6 +56,7 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 			},
 		],
 		paths: {
+		...networkPaths,
 		'/health': {
 			get: {
 				summary: 'Health check',
@@ -133,6 +135,38 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 			},
 		},
 		'/tabs': {
+			post: {
+				summary: 'Create a managed tab',
+				description: 'Create a tab with an optional initial URL and opt-in network capture.',
+				tags: ['Core'],
+				security: [{ bearerAuth: [] }, {}],
+				parameters: [{
+					name: 'X-Camofox-Network-Key', in: 'header', schema: { type: 'string' },
+					description: 'Required when joining an existing session capture.',
+				}],
+				requestBody: {
+					required: true,
+					content: { 'application/json': { schema: {
+						type: 'object', required: ['userId'],
+						anyOf: [{ required: ['sessionKey'] }, { required: ['listItemId'] }],
+						properties: {
+							userId: { type: 'string' }, sessionKey: { type: 'string' }, listItemId: { type: 'string' },
+							url: { type: 'string' }, networkCapture: networkCaptureOptions,
+						},
+					} } },
+				},
+				responses: {
+					'200': { description: 'Created tab', content: { 'application/json': { schema: {
+						type: 'object', required: ['tabId', 'url'],
+						properties: { tabId: { type: 'string' }, url: { type: 'string' }, networkKey: networkKeyResponse },
+					} } } },
+					'400': { description: 'Invalid request' },
+					'403': { description: 'Invalid browser server authentication' },
+					'404': { description: 'Capture unavailable' },
+					'409': { description: 'Session or capture conflict' },
+					'429': { description: 'Tab or capture capacity reached' },
+				},
+			},
 			get: {
 				summary: 'List tabs for a user',
 				description: 'Returns all active tabs for the specified user',
@@ -404,6 +438,7 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 								properties: {
 									url: { type: 'string' },
 									userId: { type: 'string' },
+									networkCapture: networkCaptureOptions,
 									listItemId: { type: 'string' },
 									proxyProfile: { type: 'string' },
 									proxy: {
@@ -435,6 +470,7 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 										tabId: { type: 'string' },
 										url: { type: 'string' },
 										title: { type: 'string' },
+										networkKey: networkKeyResponse,
 									},
 									required: ['ok', 'targetId', 'tabId', 'url', 'title'],
 								},
@@ -677,6 +713,11 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 				type: 'http',
 				scheme: 'bearer',
 				description: 'API key passed as Bearer token in Authorization header',
+			},
+			networkKey: {
+				type: 'apiKey',
+				in: 'header',
+				name: 'X-Camofox-Network-Key',
 			},
 			adminKey: {
 				type: 'apiKey',

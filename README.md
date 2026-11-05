@@ -21,6 +21,7 @@
 - [Usage with AI Agents](#usage-with-ai-agents)
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
+- [Network capture](#network-capture)
 - [Structured Extract](#structured-extract)
 - [Search Macros](#search-macros)
 - [Geo Presets](#geo-presets)
@@ -644,7 +645,32 @@ OpenClaw-compatible aliases (used by the OpenClaw plugin).
 | GET | `/snapshot?userId=...&targetId=...` | Snapshot (OpenClaw response shape) | Query: `userId` + `targetId` | None |
 | POST | `/act` | Combined actions (`click`, `type`, `press`, `scroll`, `scrollIntoView`, `hover`, `wait`, `close`, `extractStructured`) | Body: `userId` + `targetId` + `kind` | Conditional: `Authorization: Bearer $CAMOFOX_API_KEY` |
 
-### Structured Extract
+### Network capture
+
+Set `networkCapture: {}` on `POST /tabs` or `POST /tabs/open` to record metadata before the tab's first navigation. The response includes a private `networkKey`. Use `networkCapture: { "start": false }` to reserve a key and start recording on demand. OpenClaw's `POST /tabs/open` uses the existing canonical profile.
+
+For a capture spanning multiple tabs, set `networkCapture: { "scope": "session" }` on the first tab. On subsequent tab creation in the same logical session, send `networkCapture: { "scope": "session", "join": true }` and the capture key in the `X-Camofox-Network-Key` header. Tabs without explicit enrollment are excluded, even when they share the same browser context.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/network/capabilities` | Discover capture contract version and HAR support |
+| POST | `/network/capture/start` | Start a prepared capture |
+| POST | `/network/capture/stop` | Freeze the captured records |
+| GET | `/network/requests` | List records, using `after` and `limit` for pagination |
+| GET | `/network/requests/:id` | Inspect one request |
+| GET | `/network/har` | Download the retained records as HAR 1.2 JSON |
+
+Capture operations require `?userId=...` and the `X-Camofox-Network-Key` header. Send the server API key as a bearer token when browser authentication is configured. Keep capture keys out of URLs and shared logs. The list response includes `nextCursor` and the number of evicted entries in `dropped`.
+
+Captures hold up to 256 requests each, with up to 32 captures server-wide. Lower the entry count or active lifetime using `CAMOFOX_NETWORK_MAX_ENTRIES` and `CAMOFOX_NETWORK_TTL_MS`. The default active lifetime is 15 minutes. A stopped capture expires after 5 minutes or when its last enrolled tab closes, whichever comes first. Export before closing the tabs.
+
+The recorder observes HTTP and HTTPS requests emitted by enrolled pages, including their frames. It stores sanitized URLs without credentials, query strings, or fragments, plus selected response metadata. Response sizes are best-effort. URL paths may contain application data, so review exports before sharing them. The recorder stores metadata by default.
+
+To enable opt-in response bodies, configure `CAMOFOX_NETWORK_BODY_CAPTURE=true` and `CAMOFOX_API_KEY`, then set `networkCapture.captureBodies` to `true` when creating a capture. Retrieve an available body with `includeBody=true` on the request detail endpoint. Eligible bodies are small UTF-8 JSON, HTML, plain text, or CSV responses with a verified unencoded length. Compressed, streamed, and oversized payloads are skipped. Limits are 16 KiB per body and 64 KiB per capture. Lists and HAR exports contain metadata only.
+
+To enable request interception, configure both `CAMOFOX_API_KEY` and `CAMOFOX_NETWORK_INTERCEPTION=true`. Use `PUT /network/intercept?userId=...` with a tab capture key and a JSON body containing `rules`. Each rule matches an exact HTTP(S) URL and method for a fetch or XHR request. An `abort` rule takes `action`, `url`, and `method`. A `fulfill` rule additionally takes a static `body`, `status`, and `contentType` of `application/json` or `text/plain`. There are at most four rules per tab and each mock is capped at 16 KiB. An empty array clears rules. Stopping a capture removes its interception handler. Playwright routing can disable HTTP caching while the handler is active.
+
+## Structured Extract
 
 Structured extract returns deterministic JSON from a DOM schema without arbitrary JavaScript. Use it when you want stable data contracts instead of ad-hoc `evaluate()` calls.
 

@@ -16,6 +16,7 @@ import {
 } from '../utils/platform-support';
 import { getAllPresets, resolveContextOptions, validateContextOptions } from '../utils/presets';
 import { contextPool, getDisplayForUser } from '../services/context-pool';
+import { attachNetworkCapture, parseNetworkOptions, redactNetworkUrl } from '../services/network-capture';
 import { lifecycleController } from '../services/lifecycle-controller';
 import { recordNavSuccess } from '../services/health';
 import { handleNavFailure } from '../services/nav-recovery';
@@ -354,10 +355,13 @@ router.post(
 				timezoneId?: string;
 				geolocation?: unknown;
 				viewport?: unknown;
+				networkCapture?: unknown;
 			}
 		>,
 		res: Response,
 	) => {
+		let capture: ReturnType<typeof attachNetworkCapture> | undefined;
+		let cleanupCaptureTab: (() => Promise<void>) | undefined;
 		let createUserId: string | undefined;
 		let createSessionKey: string | undefined;
 		let createSessionMapKey: string | undefined;
@@ -381,6 +385,10 @@ router.post(
 			lifecycleController.recordInteractiveActivity();
 
 			const { userId, sessionKey, listItemId, url, preset, locale, timezoneId, geolocation, viewport } = req.body;
+			const networkOptions = parseNetworkOptions(
+				req.body.networkCapture, userId, Boolean(CONFIG.apiKey && process.env.CAMOFOX_NETWORK_BODY_CAPTURE === 'true'),
+			);
+			const networkKey = networkOptions?.join ? req.get('X-Camofox-Network-Key') : undefined;
 			const { proxy, proxyProfile, geoMode } = req.body as {
 				proxy?: unknown;
 				proxyProfile?: string;
@@ -531,6 +539,10 @@ router.post(
 				tabId = crypto.randomUUID();
 				(page as unknown as { __camofox_tabId?: string }).__camofox_tabId = tabId;
 				const tabState = await createTabState(page);
+				if (networkOptions) {
+					const group = getTabGroup(session, resolvedSessionKey);
+					capture = attachNetworkCapture(networkOptions, String(userId), group, tabId, page, networkKey);
+				}
 
 				registerDownloadListener(tabId, String(userId), page);
 				markDownloadsStaged(tabId);
@@ -555,6 +567,7 @@ router.post(
 					tabState,
 				}, generation);
 				if (!committed) {
+					capture?.rollback();
 					await rollbackStagedFirstUse(createUserId ?? userId, generation).catch(() => {});
 					if (createdSessionProfile && createdSessionProfileSignature) {
 						await rollbackSessionProfileRuntime(userId, resolvedSessionKey, createdSessionProfileSignature);
@@ -590,7 +603,17 @@ router.post(
 				const page = await acquirePageForNewTab(session.context);
 				tabId = crypto.randomUUID();
 				(page as unknown as { __camofox_tabId?: string }).__camofox_tabId = tabId;
+				if (networkOptions) {
+					cleanupCaptureTab = async () => {
+						group.delete(tabId);
+						unindexTab(tabId);
+						await safePageClose(page);
+					};
+				}
 				const tabState = await createTabState(page);
+				if (networkOptions) {
+					capture = attachNetworkCapture(networkOptions, String(userId), group, tabId, page, networkKey);
+				}
 				group.set(tabId, tabState);
 				indexTab(tabId, sessionMapKey);
 
@@ -617,14 +640,17 @@ router.post(
 				tabId,
 				userId,
 				sessionKey: resolvedSessionKey,
-			url: pageUrl,
+			url: networkOptions ? redactNetworkUrl(pageUrl) : pageUrl,
 			});
 			lifecycleController.recordInteractiveActivity();
 			releaseSessionProfileCreate?.(true);
 			releaseSessionProfileCreate = undefined;
 			createdSessionProfile = false;
-			return res.json({ tabId, url: pageUrl });
+			if (networkOptions) res.setHeader('Cache-Control', 'no-store');
+			return res.json({ tabId, url: pageUrl, ...(capture?.key ? { networkKey: capture.key } : {}) });
 		} catch (err) {
+			capture?.rollback();
+			await cleanupCaptureTab?.().catch(() => {});
 			if (isFirstCreator && createUserId) {
 				if (stagedGeneration) {
 					await rollbackStagedFirstUse(createUserId, stagedGeneration).catch(() => {});
