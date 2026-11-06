@@ -340,6 +340,21 @@ describe('security hardening', () => {
 
     expect(actResponse.status).toBe(400);
     expect(actBody.error).toContain('Blocked private network target');
+
+    const siblingResponse = await fetch(`${getServerUrl()}/tabs`, {
+      method: 'POST', headers: authHeaders,
+      body: JSON.stringify({ userId, sessionKey: listItemId }),
+    });
+    const sibling = await siblingResponse.json();
+    expect(siblingResponse.status).toBe(200);
+    for (const tabId of [opened.tabId, sibling.tabId]) {
+      const response = await fetch(`${getServerUrl()}/tabs/${tabId}/evaluate`, {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify({ userId, expression: 'location.href' }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, result: 'about:blank' });
+    }
   }, 120000);
 
   test('evaluate surfaces delayed blocked private-network navigations as 400 errors immediately', async () => {

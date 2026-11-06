@@ -16,6 +16,7 @@ import {
 import { loadConfig } from '../utils/config';
 import { closeBrowser } from '../services/browser';
 import { contextPool } from '../services/context-pool';
+import { attachNetworkCapture, parseNetworkOptions, redactNetworkUrl } from '../services/network-capture';
 import { lifecycleController } from '../services/lifecycle-controller';
 import { recordNavSuccess } from '../services/health';
 import { handleNavFailure } from '../services/nav-recovery';
@@ -121,7 +122,9 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 // POST /tabs/open - Open tab (alias for POST /tabs, OpenClaw format)
-router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; userId?: unknown; listItemId?: string; proxyProfile?: string; proxy?: unknown; geoMode?: string }>, res: Response) => {
+router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; userId?: unknown; listItemId?: string; proxyProfile?: string; proxy?: unknown; geoMode?: string; networkCapture?: unknown }>, res: Response) => {
+	let capture: ReturnType<typeof attachNetworkCapture> | undefined;
+	let cleanupCaptureTab: (() => Promise<void>) | undefined;
 	let profileUserId: unknown;
 	let profileSessionKey: string | undefined;
 	let createdSessionProfile = false;
@@ -136,6 +139,9 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		}
 
 		const { url, userId, listItemId = 'default', proxyProfile, proxy, geoMode } = req.body;
+		const networkOptions = parseNetworkOptions(
+			req.body.networkCapture, userId, Boolean(CONFIG.apiKey && process.env.CAMOFOX_NETWORK_BODY_CAPTURE === 'true'),
+		);
 		if (!userId) {
 			return res.status(400).json({ error: 'userId is required' });
 		}
@@ -246,7 +252,17 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		const group = getTabGroup(session, listItemId);
 		const page = await acquirePageForNewTab(session.context);
 		const tabId = crypto.randomUUID();
+		if (networkOptions) {
+			cleanupCaptureTab = async () => {
+				group.delete(tabId);
+				unindexTab(tabId);
+				await safePageClose(page);
+			};
+		}
 		const tabState = await createTabState(page);
+		if (networkOptions) {
+			capture = attachNetworkCapture(networkOptions, String(userId), group, tabId, page, networkOptions.join ? req.get('X-Camofox-Network-Key') : undefined);
+		}
 		group.set(tabId, tabState);
 		indexTab(tabId, sessionMapKey);
 		registerDownloadListener(tabId, String(userId), page);
@@ -269,19 +285,25 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		recordNavSuccess(String(userId), sessionMapKey);
 		tabState.visitedUrls.add(url);
 
-		log('info', 'openclaw tab opened', { reqId: req.reqId, tabId, url: page.url() });
+		log('info', 'openclaw tab opened', {
+			reqId: req.reqId, tabId, url: networkOptions ? redactNetworkUrl(page.url()) : page.url(),
+		});
 		lifecycleController.recordInteractiveActivity();
 		releaseSessionProfileCreate?.(true);
 		releaseSessionProfileCreate = undefined;
 		createdSessionProfile = false;
+		if (networkOptions) res.setHeader('Cache-Control', 'no-store');
 		return res.json({
 			ok: true,
 			targetId: tabId,
 			tabId,
 			url: page.url(),
 			title: await page.title().catch(() => ''),
+			...(capture?.key ? { networkKey: capture.key } : {}),
 		});
 	} catch (err) {
+		capture?.rollback();
+		await cleanupCaptureTab?.().catch(() => {});
 		if (createdSessionProfile && profileUserId && profileSessionKey) {
 			if (createdSessionProfileSignature) {
 				await rollbackSessionProfileRuntime(profileUserId, profileSessionKey, createdSessionProfileSignature);

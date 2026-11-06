@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.5.0] - 2026-11-06
+
+- Add opt-in, bounded network metadata capture from first navigation, explicit session tab enrollment, paginated request inspection, and sanitized HAR 1.2 export. Add opt-in bounded text response bodies, exact-match abort, and static mocks for fetch/XHR.
+- Align the published interception schema with runtime status, required-field, and UTF-8 byte limits.
+- Redact URL credentials, queries, and fragments from snapshot, click, and navigation logs as well as capture metadata.
+- Keep navigation intent attributed to its initiating action until the safety guard settles, so delayed blocked select/evaluate navigations return the existing 400 error instead of premature success.
+- Refresh the source/container lock with patched `glob`, `minimatch`, and `qs` dependencies. npm consumer installs still follow upstream dependency ranges; unused `glob`/`minimatch` advisories remain in that installation path.
+
 ## [2.4.9] - 2026-10-25
 
 ### Security

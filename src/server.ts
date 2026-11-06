@@ -4,6 +4,7 @@ import express from 'express';
 
 import coreRoutes from './routes/core';
 import openclawRoutes from './routes/openclaw';
+import networkRoutes from './routes/network';
 import docsRoutes from './routes/docs';
 import { installCrashHandlers, safeError } from './middleware/errors';
 import { loggingMiddleware, log, startStatsBeacon } from './middleware/logging';
@@ -41,6 +42,7 @@ app.use(createLifecycleActivityMiddleware(lifecycleController));
 app.use(coreRoutes);
 app.use(openclawRoutes);
 app.use(docsRoutes);
+app.use(networkRoutes);
 
 // Fallback error middleware (routes largely handle their own errors to preserve legacy behavior)
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
