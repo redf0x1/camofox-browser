@@ -775,7 +775,7 @@ router.post('/tabs/:tabId/navigate', async (req: Request<{ tabId: string }, unkn
 		if (result.status !== 200) return res.status(result.status).json(result.body);
 
 		lifecycleController.recordInteractiveActivity();
-		log('info', 'navigated', { reqId: req.reqId, tabId, url: result.body.url });
+		log('info', 'navigated', { reqId: req.reqId, tabId, url: redactNetworkUrl(result.body.url) });
 		return res.json(result.body);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -809,7 +809,7 @@ router.get('/tabs/:tabId/snapshot', async (req: Request<{ tabId: string }, unkno
 		log('info', 'snapshot', {
 			reqId: req.reqId,
 			tabId,
-			url: result.url,
+			url: redactNetworkUrl(result.url),
 			snapshotLen: result.snapshot.length,
 			refsCount: result.refsCount,
 		});
@@ -870,7 +870,7 @@ router.post('/tabs/:tabId/click', async (req: Request<{ tabId: string }, unknown
 				size: d.size,
 			}));
 		}
-		log('info', 'clicked', { reqId: req.reqId, tabId, url: result.url });
+		log('info', 'clicked', { reqId: req.reqId, tabId, url: redactNetworkUrl(result.url) });
 		lifecycleController.recordInteractiveActivity();
 		return res.json(responseObj);
 	} catch (err) {

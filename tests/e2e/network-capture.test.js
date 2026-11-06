@@ -102,6 +102,11 @@ test('captures the initial navigation, redirects, XHR, frames and failures while
     expect.objectContaining({ url: base + '/disconnect', state: 'failed' }),
   ]));
 
+  const observed = '/tabs/' + tabId;
+  expect((await request(observed + '/snapshot?userId=' + userId)).status).toBe(200);
+  expect((await request(observed + '/click', { body: { userId, selector: 'body' } })).status).toBe(200);
+  expect((await request(observed + '/navigate', { body: { userId, url: base + '/page?auth=' + secret } })).status).toBe(200);
+
   expect((await request('/network/requests?userId=other-user', { key })).status).toBe(404);
   expect((await request('/network/requests?userId=' + userId, { key, bearer: null })).status).toBe(403);
   expect((await list(undefined)).status).toBe(404);

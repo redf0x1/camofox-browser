@@ -140,15 +140,31 @@ export const networkPaths: OpenAPIV3.PathsObject = {
 					type: 'object', required: ['rules'], properties: {
 						rules: {
 							type: 'array', maxItems: 4, items: {
-								type: 'object', required: ['url', 'method', 'action'],
-								properties: {
-									url: { type: 'string', maxLength: 1024 },
-									method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
-									action: { type: 'string', enum: ['abort', 'fulfill'] },
-									body: { type: 'string', maxLength: 16 * 1024 },
-									status: { type: 'integer' },
-									contentType: { type: 'string', enum: ['application/json', 'text/plain'] },
-								},
+								oneOf: [
+									{
+										type: 'object', additionalProperties: false, required: ['url', 'method', 'action'],
+										properties: {
+											url: { type: 'string', format: 'uri', maxLength: 1024, description: 'Exact HTTP(S) URL without credentials or a fragment.' },
+											method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+											action: { type: 'string', enum: ['abort'] },
+										},
+									},
+									{
+										type: 'object', additionalProperties: false, required: ['url', 'method', 'action', 'body', 'status', 'contentType'],
+										properties: {
+											url: { type: 'string', format: 'uri', maxLength: 1024, description: 'Exact HTTP(S) URL without credentials or a fragment.' },
+											method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+											action: { type: 'string', enum: ['fulfill'] },
+											body: { type: 'string', maxLength: 16 * 1024, description: 'Static UTF-8 text, at most 16384 encoded bytes (not characters).' },
+											status: { oneOf: [
+												{ type: 'integer', minimum: 200, maximum: 203 },
+												{ type: 'integer', minimum: 206, maximum: 299 },
+												{ type: 'integer', minimum: 400, maximum: 599 },
+											] },
+											contentType: { type: 'string', enum: ['application/json', 'text/plain'] },
+										},
+									},
+								],
 							},
 						},
 					},

@@ -1,8 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [2.5.0] - 2026-11-06
 
 - Add opt-in, bounded network metadata capture from first navigation, explicit session tab enrollment, paginated request inspection, and sanitized HAR 1.2 export. Add opt-in bounded text response bodies, exact-match abort, and static mocks for fetch/XHR.
+- Align the published interception schema with runtime status, required-field, and UTF-8 byte limits.
+- Redact URL credentials, queries, and fragments from snapshot, click, and navigation logs as well as capture metadata.
+- Require patched `glob`, `minimatch`, and `qs` runtime dependencies to address current cancellation, pattern-amplification, and query-string advisories.
 
 ## [2.4.9] - 2026-10-25
 
