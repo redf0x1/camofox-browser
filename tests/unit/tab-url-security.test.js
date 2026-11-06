@@ -945,8 +945,16 @@ describe('validateUrl() network safety', () => {
     }
   });
 
-  test('keeps action-scheduled RAF navigation attributed until the frame runs', async () => {
+  test.each([
+    ['animation frame', false, false, true],
+    ['beforeunload after select', true, true, true],
+    ['beforeunload after evaluate', true, false, true],
+    ['beforeunload committing a public document', true, false, false],
+    ['beforeunload whose request outlives the deadline', true, false, true, false],
+    ['tokenless background beforeunload', true, true, true, true, true],
+  ])('keeps %s navigation attributed until the guard runs', async (_kind, beforeUnload, settlePostActionNavigation, privateTarget, requestArrives = true, background = false) => {
     let routeHandler;
+    const listeners = new Map();
     let nextRafId = 1;
     const rafCallbacks = new Map();
     const trackerState = {
@@ -954,6 +962,7 @@ describe('validateUrl() network safety', () => {
       pendingCounts: new Map(),
     };
     const sandbox = {
+      addEventListener: (name, callback) => listeners.set(name, callback),
       clearInterval,
       clearTimeout,
       console,
@@ -978,14 +987,21 @@ describe('validateUrl() network safety', () => {
       },
     };
     sandbox.globalThis = sandbox;
+    sandbox.top = sandbox;
     const browserContext = vm.createContext(sandbox);
+    const frame = { page: () => page };
     const blockedRoute = {
       request: () => ({
-        url: () => 'http://169.254.169.254/latest/meta-data',
+        url: () => privateTarget ? 'http://169.254.169.254/latest/meta-data' : 'http://93.184.216.34/',
         isNavigationRequest: () => true,
-        frame: () => ({ page: () => page }),
+        frame: () => frame,
       }),
-      continue: jest.fn().mockResolvedValue(undefined),
+      continue: jest.fn(async () => {
+        // A committed document abandons its old navigation/timer state.
+        const tracker = sandbox.__camofoxActionTracker;
+        tracker.finishNavigation(tracker.getActiveToken(true));
+        tracker.finishAction(tracker.getActiveToken());
+      }),
       abort: jest.fn().mockResolvedValue(undefined),
     };
     const context = {
@@ -997,11 +1013,12 @@ describe('validateUrl() network safety', () => {
           sandbox.__camofoxUpdateActiveToken = (token) => callback({ page }, token);
         }
         if (name === '__camofoxUpdatePendingCount') {
-          sandbox.__camofoxUpdatePendingCount = (token, count) => callback({ page }, token, count);
+          sandbox.__camofoxUpdatePendingCount = (token, count, navigationToken) => callback({ page }, token, count, navigationToken);
         }
       }),
     };
     const page = {
+      mainFrame: () => frame,
       context: jest.fn(() => context),
       on: jest.fn(),
       addInitScript: jest.fn().mockResolvedValue(undefined),
@@ -1020,7 +1037,10 @@ describe('validateUrl() network safety', () => {
           return sandbox.__camofoxActionTracker.getPendingCount(arg);
         }
         if (source.includes('getActiveToken')) {
-          return sandbox.__camofoxActionTracker.getActiveToken();
+          return sandbox.__camofoxActionTracker.getActiveToken(arg);
+        }
+        if (source.includes('finishNavigation')) {
+          return sandbox.__camofoxActionTracker.finishNavigation(arg);
         }
         return undefined;
       }),
@@ -1028,24 +1048,44 @@ describe('validateUrl() network safety', () => {
 
     await createTabState(page);
     const actionPromise = withBlockedNavigationTracking(page, async () => {
-      sandbox.requestAnimationFrame(() => {
-        void routeHandler(blockedRoute);
+      if (beforeUnload) {
+        if (background) sandbox.__camofoxActionTracker.finishAction(1);
+        listeners.get('beforeunload')?.();
+        if (background) sandbox.__camofoxActionTracker.startAction(1);
+      } else {
+        sandbox.requestAnimationFrame(() => { void routeHandler(blockedRoute); });
+      }
+    }, { settlePostActionNavigation });
+    const actionOutcome = actionPromise.then((value) => ({ value }), (error) => ({ error }));
+
+    if (beforeUnload) {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      if (requestArrives) await routeHandler(blockedRoute);
+    } else {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(rafCallbacks).toHaveProperty('size', 1);
+      const [rafId, callback] = rafCallbacks.entries().next().value;
+      rafCallbacks.delete(rafId);
+      callback(0);
+    }
+
+    if (privateTarget && !background) {
+      expect((await actionOutcome).error).toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining(requestArrives ? 'Blocked private network target' : 'did not settle'),
       });
-    });
-
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(rafCallbacks).toHaveProperty('size', 1);
-    expect(sandbox.__camofoxActionTracker.getPendingCount(1)).toBe(1);
-
-    const [rafId, callback] = rafCallbacks.entries().next().value;
-    rafCallbacks.delete(rafId);
-    callback(0);
-
-    await expect(actionPromise).rejects.toMatchObject({
-      statusCode: 400,
-      message: expect.stringContaining('Blocked private network target'),
-    });
-    expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
+      expect(blockedRoute.abort).toHaveBeenCalledTimes(requestArrives ? 1 : 0);
+    } else {
+      expect(await actionOutcome).toEqual({ value: undefined });
+      expect(blockedRoute.continue).toHaveBeenCalledTimes(privateTarget ? 0 : 1);
+      expect(blockedRoute.abort).toHaveBeenCalledTimes(privateTarget ? 1 : 0);
+    }
+    await expect(withBlockedNavigationTracking(page, async () => 'allowed')).resolves.toBe('allowed');
+    if (!requestArrives) {
+      await routeHandler(blockedRoute);
+      expect(blockedRoute.abort).toHaveBeenCalledTimes(1);
+      await expect(withBlockedNavigationTracking(page, async () => 'still allowed')).resolves.toBe('still allowed');
+    }
   });
 
   test('typeTab does not miss delayed blocked navigations that require async DNS resolution', async () => {

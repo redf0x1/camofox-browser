@@ -79,6 +79,7 @@ const popupOpenerPages = new WeakMap<Page, Page>();
 const inFlightGuardChecks = new WeakMap<Page, number>();
 const trackedInFlightGuardChecks = new WeakMap<Page, Map<number, number>>();
 const trackedPendingCounts = new WeakMap<Page, Map<number, number>>();
+const pendingNavigationTokens = new WeakMap<Page, number>();
 const actionTrackerInstalledPages = new WeakSet<Page>();
 const actionTrackerBindingContexts = new WeakSet<BrowserContext>();
 const actionTrackerTokens = new WeakMap<Page, number>();
@@ -335,6 +336,7 @@ function installActionTrackerScript(): void {
 
 	const state = {
 		activeToken: 0,
+		navigationToken: null as number | null,
 		pendingCounts: new Map<number, number>(),
 		timeoutTokens: new Map<any, number>(),
 		intervalTokens: new Map<any, number>(),
@@ -343,7 +345,7 @@ function installActionTrackerScript(): void {
 
 	const increment = (token: number) => {
 		state.pendingCounts.set(token, (state.pendingCounts.get(token) || 0) + 1);
-		void browserGlobal.__camofoxUpdatePendingCount?.(token, state.pendingCounts.get(token) || 0);
+		void browserGlobal.__camofoxUpdatePendingCount?.(token, state.pendingCounts.get(token) || 0, state.navigationToken);
 	};
 
 	const decrement = (token: number) => {
@@ -353,7 +355,7 @@ function installActionTrackerScript(): void {
 		} else {
 			state.pendingCounts.delete(token);
 		}
-		void browserGlobal.__camofoxUpdatePendingCount?.(token, state.pendingCounts.get(token) || 0);
+		void browserGlobal.__camofoxUpdatePendingCount?.(token, state.pendingCounts.get(token) || 0, state.navigationToken);
 	};
 
 	const syncActiveToken = (token: number) => {
@@ -391,6 +393,17 @@ function installActionTrackerScript(): void {
 	const originalQueueMicrotask = typeof browserGlobal.queueMicrotask === 'function'
 		? browserGlobal.queueMicrotask.bind(browserGlobal)
 		: null;
+
+	// Firefox can dispatch the navigation request well after location changes
+	// trigger beforeunload. Keep that intent pending until the route guard owns
+	// it, rather than treating an empty timer queue as action completion.
+	if (typeof browserGlobal.addEventListener === 'function' && browserGlobal === browserGlobal.top) {
+		browserGlobal.addEventListener('beforeunload', () => {
+			if (state.navigationToken === state.activeToken) return;
+			state.navigationToken = state.activeToken;
+			void browserGlobal.__camofoxUpdatePendingCount?.(state.activeToken, state.pendingCounts.get(state.activeToken) || 0, state.navigationToken);
+		});
+	}
 
 	// Wrap tokenless callbacks too, so background work restores token 0 while a
 	// tracked action is in its bounded post-action attribution window.
@@ -496,10 +509,17 @@ function installActionTrackerScript(): void {
 			}
 		},
 		getPendingCount(token: number) {
-			return state.pendingCounts.get(token) || 0;
+			return (state.pendingCounts.get(token) || 0) + (state.navigationToken === token ? 1 : 0);
 		},
-		getActiveToken() {
-			return state.activeToken || 0;
+		getActiveToken(forNavigation = false) {
+			return (forNavigation ? state.navigationToken ?? state.activeToken : state.activeToken) || 0;
+		},
+		finishNavigation(token: number) {
+			if (state.navigationToken !== token) return;
+			state.navigationToken = null;
+		},
+		getPendingNavigationToken() {
+			return state.navigationToken || 0;
 		},
 	};
 }
@@ -527,9 +547,16 @@ async function ensureActionNavigationTracker(page: Page): Promise<boolean> {
 			await (context as BrowserContext & {
 				exposeBinding: (
 					name: string,
-					callback: (source: { page?: Page }, token: unknown, count: unknown) => void | Promise<void>,
+					callback: (source: { page?: Page }, token: unknown, count: unknown, navigationToken: unknown) => void | Promise<void>,
 				) => Promise<void>;
-			}).exposeBinding('__camofoxUpdatePendingCount', async ({ page: bindingPage }, token, count) => {
+			}).exposeBinding('__camofoxUpdatePendingCount', async ({ page: bindingPage }, token, count, navigationToken) => {
+				if (bindingPage && navigationToken !== undefined) {
+					if (typeof navigationToken === 'number' && navigationToken >= 0) {
+						pendingNavigationTokens.set(bindingPage, navigationToken);
+					} else {
+						pendingNavigationTokens.delete(bindingPage);
+					}
+				}
 				if (!bindingPage || typeof token !== 'number' || token <= 0) return;
 				const existing = trackedPendingCounts.get(bindingPage) || new Map<number, number>();
 				if (typeof count === 'number' && count > 0) {
@@ -584,6 +611,7 @@ async function finishTrackedAction(page: Page, token: number | null): Promise<vo
 
 async function getTrackedPendingCount(page: Page, token: number): Promise<number> {
 	const syncedCount = trackedPendingCounts.get(page)?.get(token);
+	if (pendingNavigationTokens.get(page) === token) return (syncedCount || 0) + 1;
 	if (typeof syncedCount === 'number') {
 		return syncedCount;
 	}
@@ -597,14 +625,17 @@ async function getTrackedPendingCount(page: Page, token: number): Promise<number
 	}
 }
 
-async function getCurrentTrackedActionToken(page: Page): Promise<number | null> {
+async function getCurrentTrackedActionToken(page: Page, forNavigation = false): Promise<number | null> {
+	// The initiating document may already be gone; keep its page-local owner,
+	// including token 0 for background navigation, rather than a later action.
+	if (forNavigation && pendingNavigationTokens.has(page)) return pendingNavigationTokens.get(page) || null;
 	if (typeof page.evaluate !== 'function' || !actionTrackerInstalledPages.has(page)) {
 		return activeTrackedActionTokens.get(page) || null;
 	}
 	try {
-		const token = await page.evaluate(() => {
-			return (globalThis as any).__camofoxActionTracker?.getActiveToken?.() || 0;
-		});
+		const token = await page.evaluate((navigation) => {
+			return (globalThis as any).__camofoxActionTracker?.getActiveToken?.(navigation) || 0;
+		}, forNavigation);
 		if (typeof token === 'number') {
 			return token > 0 ? token : null;
 		}
@@ -755,9 +786,13 @@ export async function withBlockedNavigationTracking<T>(
 			if (Date.now() >= drainDeadline) {
 				// Include guards still resolving their action token, before they
 				// appear in the per-action counter.
-				if (getInFlightGuardCheckCount(page) > 0) {
+				if (getInFlightGuardCheckCount(page) > 0 || pendingNavigationTokens.get(page) === actionToken) {
 					throw createPostActionNavigationTimeoutError();
 				}
+				const pendingNavigationToken = await withPostActionNavigationDeadline(page.evaluate(() => {
+					return (globalThis as any).__camofoxActionTracker?.getPendingNavigationToken?.() || 0;
+				}), Date.now() + POST_ACTION_NAVIGATION_DRAIN_TIMEOUT_MS);
+				if (pendingNavigationToken === actionToken) throw createPostActionNavigationTimeoutError();
 				log('warn', 'action drain timed out, proceeding without full settle', {
 					timeoutMs: ACTION_TRACKER_DRAIN_TIMEOUT_MS,
 				});
@@ -1185,6 +1220,8 @@ async function ensureNavigationSafetyGuard(page: Pick<Page, 'context'>, options:
 		const requestPage = requestFrame && typeof requestFrame.page === 'function' ? requestFrame.page() : null;
 		const relatedPages = new Set<Page>();
 		let trackedToken: number | null = null;
+		let requestToken: number | null = null;
+		const isMainFrame = !!requestPage && typeof requestPage.mainFrame === 'function' && requestFrame === requestPage.mainFrame();
 		const addRelatedPage = (page: Page): void => {
 			if (relatedPages.has(page)) return;
 			relatedPages.add(page);
@@ -1197,7 +1234,8 @@ async function ensureNavigationSafetyGuard(page: Pick<Page, 'context'>, options:
 		try {
 			if (requestPage) {
 				addRelatedPage(requestPage);
-				trackedToken = await getCurrentTrackedActionToken(requestPage);
+				trackedToken = await getCurrentTrackedActionToken(requestPage, isMainFrame);
+				requestToken = trackedToken;
 				const mappedOpener = popupOpenerPages.get(requestPage);
 				if (mappedOpener) {
 					addRelatedPage(mappedOpener);
@@ -1234,6 +1272,12 @@ async function ensureNavigationSafetyGuard(page: Pick<Page, 'context'>, options:
 			}
 			return route.continue();
 		} finally {
+			if (requestPage && isMainFrame && pendingNavigationTokens.get(requestPage) === (requestToken || 0)) {
+				await withTimeout(requestPage.evaluate((token) => {
+					(globalThis as any).__camofoxActionTracker?.finishNavigation?.(token);
+				}, requestToken || 0), POST_ACTION_NAVIGATION_DRAIN_TIMEOUT_MS, 'navigation intent completion').catch(() => {});
+				if (pendingNavigationTokens.get(requestPage) === (requestToken || 0)) pendingNavigationTokens.delete(requestPage);
+			}
 			for (const relatedPage of relatedPages) {
 				decrementInFlightGuardCheck(relatedPage);
 				if (trackedToken !== null) {
