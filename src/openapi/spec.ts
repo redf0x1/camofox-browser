@@ -165,6 +165,7 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 					'404': { description: 'Capture unavailable' },
 					'409': { description: 'Session or capture conflict' },
 					'429': { description: 'Tab or capture capacity reached' },
+					'504': { description: 'The browser timed out creating a page in an existing session' },
 				},
 			},
 			get: {
@@ -530,6 +531,7 @@ export function buildOpenapiSpec(serverUrl = '.'): OpenAPIV3_1.Document {
 							},
 						},
 					},
+					'504': { description: 'The browser timed out creating a page in the session' },
 				},
 			},
 		},

@@ -19,7 +19,7 @@ import { contextPool, getDisplayForUser } from '../services/context-pool';
 import { attachNetworkCapture, parseNetworkOptions, redactNetworkUrl } from '../services/network-capture';
 import { lifecycleController } from '../services/lifecycle-controller';
 import { recordNavSuccess } from '../services/health';
-import { handleNavFailure } from '../services/nav-recovery';
+import { acquirePageForSession, handleNavFailure } from '../services/nav-recovery';
 import { startVnc, stopVnc } from '../services/vnc';
 import {
 	MAX_TABS_PER_SESSION,
@@ -600,7 +600,7 @@ router.post(
 				}
 
 				const group = getTabGroup(session, resolvedSessionKey);
-				const page = await acquirePageForNewTab(session.context);
+				const page = await acquirePageForSession(session.context, String(userId), sessionMapKey, session.generation, CONFIG.handlerTimeoutMs);
 				tabId = crypto.randomUUID();
 				(page as unknown as { __camofox_tabId?: string }).__camofox_tabId = tabId;
 				if (networkOptions) {
