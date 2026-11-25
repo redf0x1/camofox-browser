@@ -19,7 +19,7 @@ import { contextPool, getDisplayForUser } from '../services/context-pool';
 import { attachNetworkCapture, parseNetworkOptions, redactNetworkUrl } from '../services/network-capture';
 import { lifecycleController } from '../services/lifecycle-controller';
 import { recordNavSuccess } from '../services/health';
-import { acquirePageForSession, handleNavFailure } from '../services/nav-recovery';
+import { acquirePageForSession, handleNavFailure, TabCreationTimeoutError } from '../services/nav-recovery';
 import { startVnc, stopVnc } from '../services/vnc';
 import {
 	MAX_TABS_PER_SESSION,
@@ -660,7 +660,7 @@ router.post(
 			}
 			if (createdSessionProfile && createUserId && createSessionKey) {
 				if (createdSessionProfileSignature) {
-					await rollbackSessionProfileRuntime(createUserId, createSessionKey, createdSessionProfileSignature);
+					await rollbackSessionProfileRuntime(createUserId, createSessionKey, createdSessionProfileSignature, !(err instanceof TabCreationTimeoutError));
 				} else {
 					clearSessionProfile(createUserId, createSessionKey);
 				}

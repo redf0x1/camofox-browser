@@ -21,6 +21,11 @@ async function recoverSessionContext(userId: string, sessionMapKey: string | und
 	}
 }
 
+export class TabCreationTimeoutError extends Error {
+	readonly statusCode = 504;
+	readonly code = 'ETIMEDOUT';
+}
+
 /** Bound page creation on an established context, without waiting for teardown. */
 export async function acquirePageForSession(
 	context: BrowserContext, userId: string, sessionMapKey: string, generation: string, timeoutMs: number,
@@ -46,7 +51,7 @@ export async function acquirePageForSession(
 		if (entry?.generation === generation && entry.context === context && entry.userId === userId && !entry.staged) {
 			void recoverSessionContext(userId, sessionMapKey, 'tab creation timed out');
 		}
-		throw Object.assign(err as Error, { statusCode: 504 });
+		throw new TabCreationTimeoutError((err as Error).message);
 	}
 }
 

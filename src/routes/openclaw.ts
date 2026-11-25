@@ -19,7 +19,7 @@ import { contextPool } from '../services/context-pool';
 import { attachNetworkCapture, parseNetworkOptions, redactNetworkUrl } from '../services/network-capture';
 import { lifecycleController } from '../services/lifecycle-controller';
 import { recordNavSuccess } from '../services/health';
-import { acquirePageForSession, handleNavFailure } from '../services/nav-recovery';
+import { acquirePageForSession, handleNavFailure, TabCreationTimeoutError } from '../services/nav-recovery';
 import { registerDownloadListener } from '../services/download';
 import {
 	MAX_TABS_PER_SESSION,
@@ -305,7 +305,7 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		await cleanupCaptureTab?.().catch(() => {});
 		if (createdSessionProfile && profileUserId && profileSessionKey) {
 			if (createdSessionProfileSignature) {
-				await rollbackSessionProfileRuntime(profileUserId, profileSessionKey, createdSessionProfileSignature);
+				await rollbackSessionProfileRuntime(profileUserId, profileSessionKey, createdSessionProfileSignature, !(err instanceof TabCreationTimeoutError));
 			} else {
 				clearSessionProfile(profileUserId, profileSessionKey);
 			}

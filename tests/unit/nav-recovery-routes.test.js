@@ -81,7 +81,7 @@ const mockCloseContextIfMatches = jest.fn(async (profileKey, expectedGeneration)
   if (!entry) return;
   if (entry.generation !== expectedGeneration) return;
   mockPool.delete(profileKey);
-  mockCloseContext(profileKey);
+  await mockCloseContext(profileKey);
 });
 
 jest.mock('../../dist/src/services/context-pool', () => ({
@@ -487,7 +487,39 @@ describe('Nav recovery — route-level tests (round 5 blockers)', () => {
     expect(latePage.close).toHaveBeenCalledTimes(1);
   });
 
-  // ── 1. Non-navigation errors do not count ─────────────────────
+  test.each(['/tabs', '/tabs/open'])('%s returns 504 without waiting to roll back a new session profile', async (route) => {
+    const userId = 'profile-tab-create-stall';
+    const profileKey = 'new-profile';
+    sessionModule.commitCanonicalProfile(userId, null);
+    mockEnsureContext.mockImplementation(async (key) => {
+      const entry = {
+        userId, profileKey: key, context: { close: jest.fn() },
+        generation: nextTestSessionGeneration(), staged: false,
+      };
+      mockPool.set(key, entry);
+      return entry;
+    });
+    let finishClose;
+    const pendingClose = new Promise((resolve) => { finishClose = resolve; });
+    mockCloseContext.mockReturnValue(pendingClose);
+    let finishPage;
+    const latePage = makeRoutePage();
+    mockAcquirePageForNewTab.mockImplementationOnce(() => new Promise((resolve) => { finishPage = resolve; }));
+
+    try {
+      await supertest(app).post(route)
+        .send({ userId, sessionKey: profileKey, listItemId: profileKey, geoMode: 'off', url: 'http://example.com' })
+        .timeout({ deadline: 800 }).expect(504);
+      expect(mockCloseContext).toHaveBeenCalled();
+      expect(sessionModule.getEstablishedSessionProfile(userId, profileKey)).toBeUndefined();
+    } finally {
+      finishClose();
+      finishPage?.(latePage);
+      await new Promise(setImmediate);
+    }
+  });
+
+  // ── 1. Non-navigation errors do not count ───────────────────────────
 
   describe('HIGH 1 — navError scoped to actual navigation only', () => {
     test('validation error (pre-navigation) does not count toward threshold', async () => {
