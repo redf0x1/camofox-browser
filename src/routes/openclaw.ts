@@ -19,7 +19,7 @@ import { contextPool } from '../services/context-pool';
 import { attachNetworkCapture, parseNetworkOptions, redactNetworkUrl } from '../services/network-capture';
 import { lifecycleController } from '../services/lifecycle-controller';
 import { recordNavSuccess } from '../services/health';
-import { handleNavFailure } from '../services/nav-recovery';
+import { acquirePageForSession, handleNavFailure, TabCreationTimeoutError } from '../services/nav-recovery';
 import { registerDownloadListener } from '../services/download';
 import {
 	MAX_TABS_PER_SESSION,
@@ -45,7 +45,6 @@ import {
 	withUserLimit,
 } from '../services/session';
 import {
-	acquirePageForNewTab,
 	buildSnapshotPayload,
 	buildRefs,
 	createTabState,
@@ -250,7 +249,7 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		}
 
 		const group = getTabGroup(session, listItemId);
-		const page = await acquirePageForNewTab(session.context);
+		const page = await acquirePageForSession(session.context, String(userId), sessionMapKey, session.generation, CONFIG.handlerTimeoutMs);
 		const tabId = crypto.randomUUID();
 		if (networkOptions) {
 			cleanupCaptureTab = async () => {
@@ -306,7 +305,7 @@ router.post('/tabs/open', async (req: Request<unknown, unknown, { url?: string; 
 		await cleanupCaptureTab?.().catch(() => {});
 		if (createdSessionProfile && profileUserId && profileSessionKey) {
 			if (createdSessionProfileSignature) {
-				await rollbackSessionProfileRuntime(profileUserId, profileSessionKey, createdSessionProfileSignature);
+				await rollbackSessionProfileRuntime(profileUserId, profileSessionKey, createdSessionProfileSignature, !(err instanceof TabCreationTimeoutError));
 			} else {
 				clearSessionProfile(profileUserId, profileSessionKey);
 			}

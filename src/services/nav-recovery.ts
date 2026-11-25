@@ -1,6 +1,59 @@
+import type { BrowserContext, Page } from 'playwright-core';
 import { log } from '../middleware/logging';
 import { recordNavFailure, acquireRecoveryLock, releaseRecoveryLock, deleteUserHealth } from './health';
 import { contextPool } from './context-pool';
+import { acquirePageForNewTab, safePageClose, withTimeout } from './tab';
+
+async function recoverSessionContext(userId: string, sessionMapKey: string | undefined, reason: string): Promise<void> {
+	const target = { userId, sessionMapKey: sessionMapKey ?? null };
+	if (!acquireRecoveryLock(userId, sessionMapKey)) {
+		log('info', `${reason}, recovery already in flight`, target);
+		return;
+	}
+	try {
+		log('info', `${reason}, recovering browser context`, target);
+		await contextPool.closeContextBySession(userId, sessionMapKey);
+	} catch {
+		// Recovery is best-effort and must not replace the original route error.
+	} finally {
+		releaseRecoveryLock(userId, sessionMapKey);
+		deleteUserHealth(userId, sessionMapKey);
+	}
+}
+
+export class TabCreationTimeoutError extends Error {
+	readonly statusCode = 504;
+	readonly code = 'ETIMEDOUT';
+}
+
+/** Bound page creation on an established context, without waiting for teardown. */
+export async function acquirePageForSession(
+	context: BrowserContext, userId: string, sessionMapKey: string, generation: string, timeoutMs: number,
+): Promise<Page> {
+	let expired = false;
+	let settled = false;
+	const pending = acquirePageForNewTab(context).then((page) => {
+		settled = true;
+		// Playwright does not cancel newPage when the caller's deadline expires.
+		if (expired) void safePageClose(page);
+		return page;
+	}, (err: unknown) => {
+		settled = true;
+		throw err;
+	});
+	try {
+		return await withTimeout(pending, timeoutMs, 'tab creation');
+	} catch (err) {
+		if (settled) throw err;
+		expired = true;
+		const entry = contextPool.getEntry(sessionMapKey);
+		// A deadline from an old request must not close a replacement context.
+		if (entry?.generation === generation && entry.context === context && entry.userId === userId && !entry.staged) {
+			void recoverSessionContext(userId, sessionMapKey, 'tab creation timed out');
+		}
+		throw new TabCreationTimeoutError((err as Error).message);
+	}
+}
 
 /**
  * Record a navigation failure for a specific session and recover
@@ -24,33 +77,12 @@ import { contextPool } from './context-pool';
  * Safe to call from route catch blocks: best-effort, never throws.
  */
 export async function handleNavFailure(userId: string, sessionMapKey?: string): Promise<void> {
-	let lockAcquired = false;
 	try {
 		if (!userId) return;
 		const exceeded = recordNavFailure(userId, sessionMapKey);
 		if (!exceeded) return;
-		// Single-flight: skip if a recovery for this session is already running.
-		if (!acquireRecoveryLock(userId, sessionMapKey)) {
-			log('info', 'nav failure threshold exceeded, recovery already in flight', {
-				userId,
-				sessionMapKey: sessionMapKey ?? null,
-			});
-			return;
-		}
-		lockAcquired = true;
-		log('info', 'nav failure threshold exceeded, recovering browser context', {
-			userId,
-			sessionMapKey: sessionMapKey ?? null,
-		});
-		await contextPool.closeContextBySession(userId, sessionMapKey);
+		await recoverSessionContext(userId, sessionMapKey, 'nav failure threshold exceeded');
 	} catch {
 		// Best-effort recovery — never propagate
-	} finally {
-		if (lockAcquired) {
-			releaseRecoveryLock(userId, sessionMapKey);
-			// Evict the session's health entry after recovery so the map
-			// doesn't grow unbounded over the process lifetime.
-			deleteUserHealth(userId, sessionMapKey);
-		}
 	}
 }

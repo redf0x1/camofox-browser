@@ -686,6 +686,7 @@ export async function rollbackSessionProfileRuntime(
 	userId: unknown,
 	sessionKey: string,
 	profileSignature: string,
+	waitForClose = true,
 ): Promise<void> {
 	const overlayKey = sessionOverlayKey(userId, sessionKey);
 	const existingProfile = sessionProfiles.get(overlayKey);
@@ -703,7 +704,9 @@ export async function rollbackSessionProfileRuntime(
 	sessionOwners.delete(sessionMapKey);
 	launchingSessions.delete(sessionMapKey);
 	launchingSessionOwners.delete(sessionMapKey);
-	await contextPool.closeContext(sessionMapKey).catch(() => {});
+	// Unpublish the failed profile synchronously even if browser I/O is stuck.
+	const closing = contextPool.closeContext(sessionMapKey).catch(() => {});
+	if (waitForClose) await closing;
 }
 
 /**

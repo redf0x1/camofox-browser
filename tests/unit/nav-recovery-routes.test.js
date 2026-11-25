@@ -81,7 +81,7 @@ const mockCloseContextIfMatches = jest.fn(async (profileKey, expectedGeneration)
   if (!entry) return;
   if (entry.generation !== expectedGeneration) return;
   mockPool.delete(profileKey);
-  mockCloseContext(profileKey);
+  await mockCloseContext(profileKey);
 });
 
 jest.mock('../../dist/src/services/context-pool', () => ({
@@ -119,11 +119,11 @@ jest.mock('../../dist/src/services/tab', () => ({
   navigateWithSafetyGuard: mockNavigate,
   validateNavigationUrl: mockValidateUrl,
   buildRefs: mockBuildRefs,
-  withTimeout: jest.fn(async (promise) => promise), // pass-through
+  withTimeout: jest.requireActual('../../dist/src/services/tab').withTimeout,
   withTabLock: jest.fn(async (_tabId, op) => op()), // pass-through
   createTabState: mockCreateTabState,
   acquirePageForNewTab: mockAcquirePageForNewTab,
-  safePageClose: jest.fn(),
+  safePageClose: jest.fn(async (page) => page?.close()),
   buildSnapshotPayload: jest.fn(),
   calculateTypeTimeoutMs: jest.fn(() => 5000),
   clearTabLock: jest.fn(),
@@ -206,7 +206,7 @@ jest.mock('../../dist/src/utils/config', () => ({
     failureThreshold: 3,
     maxSessions: 10,
     maxConcurrentPerUser: 5,
-    handlerTimeoutMs: 30000,
+    handlerTimeoutMs: 75,
     maxTabsPerSession: 10,
     allowPrivateNetworkTargets: false,
     apiKey: null,
@@ -456,7 +456,70 @@ describe('Nav recovery — route-level tests (round 5 blockers)', () => {
     mockPool.clear();
   });
 
-  // ── 1. Non-navigation errors do not count ─────────────────────
+  test.each(['/tabs', '/tabs/open'])('%s bounds a stalled tab creation and recovers only the affected session', async (route) => {
+    const userId = 'tab-create-stall';
+    const { session, sessionKey, entry } = setupOpenClawSession(userId);
+    const request = { userId, sessionKey: 'stalled', url: 'http://example.com' };
+    const siblingKey = sessionModule.getSessionMapKey(userId, 'healthy', 'healthy-profile');
+    setupFakeTab(userId, 'healthy-tab', siblingKey);
+    let finishPage;
+    const latePage = makeRoutePage();
+    mockAcquirePageForNewTab.mockImplementationOnce(() => new Promise((resolve) => { finishPage = resolve; }));
+    mockEnsureContext.mockImplementation(async (key) => {
+      if (mockPool.has(key)) return mockPool.get(key);
+      const replacement = { ...entry, context: { close: jest.fn() }, generation: nextTestSessionGeneration() };
+      mockPool.set(key, replacement);
+      return replacement;
+    });
+
+    try {
+      await supertest(app).post(route).send(request)
+        .timeout({ deadline: 800 }).expect(504);
+      expect(mockCloseContext).toHaveBeenCalledTimes(1);
+      expect(mockCloseContext).toHaveBeenCalledWith(sessionKey);
+      expect(sessionModule.findTabById('healthy-tab', userId)).not.toBeNull();
+      await supertest(app).post(route).send(request).expect(200);
+      expect(mockPool.get(sessionKey).context).not.toBe(session.context);
+    } finally {
+      finishPage?.(latePage);
+      await new Promise(setImmediate);
+    }
+    expect(latePage.close).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(['/tabs', '/tabs/open'])('%s returns 504 without waiting to roll back a new session profile', async (route) => {
+    const userId = 'profile-tab-create-stall';
+    const profileKey = 'new-profile';
+    sessionModule.commitCanonicalProfile(userId, null);
+    mockEnsureContext.mockImplementation(async (key) => {
+      const entry = {
+        userId, profileKey: key, context: { close: jest.fn() },
+        generation: nextTestSessionGeneration(), staged: false,
+      };
+      mockPool.set(key, entry);
+      return entry;
+    });
+    let finishClose;
+    const pendingClose = new Promise((resolve) => { finishClose = resolve; });
+    mockCloseContext.mockReturnValue(pendingClose);
+    let finishPage;
+    const latePage = makeRoutePage();
+    mockAcquirePageForNewTab.mockImplementationOnce(() => new Promise((resolve) => { finishPage = resolve; }));
+
+    try {
+      await supertest(app).post(route)
+        .send({ userId, sessionKey: profileKey, listItemId: profileKey, geoMode: 'off', url: 'http://example.com' })
+        .timeout({ deadline: 800 }).expect(504);
+      expect(mockCloseContext).toHaveBeenCalled();
+      expect(sessionModule.getEstablishedSessionProfile(userId, profileKey)).toBeUndefined();
+    } finally {
+      finishClose();
+      finishPage?.(latePage);
+      await new Promise(setImmediate);
+    }
+  });
+
+  // ── 1. Non-navigation errors do not count ───────────────────────────
 
   describe('HIGH 1 — navError scoped to actual navigation only', () => {
     test('validation error (pre-navigation) does not count toward threshold', async () => {
